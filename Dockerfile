@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Base tooling + locale + universe repo for ROS apt sources
 RUN apt-get update && apt-get install -y \
-    git curl wget gnupg2 lsb-release locales software-properties-common \
+    git curl wget gnupg2 lsb-release locales software-properties-common vim \
     && locale-gen en_US.UTF-8 \
     && add-apt-repository universe \
     && rm -rf /var/lib/apt/lists/*
@@ -22,6 +22,7 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
 RUN apt-get update && apt-get install -y \
     ros-jazzy-ros-base \
     ros-jazzy-cv-bridge \
+    ros-jazzy-vision-msgs \
     python3-colcon-common-extensions \
     && rm -rf /var/lib/apt/lists/*
 
