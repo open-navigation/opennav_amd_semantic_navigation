@@ -1,32 +1,47 @@
-# Open Navigation x AMD Semantic SAM3 Navigation on AMD Ryzen AI Max+
+# Semantic SAM3 Navigation on AMD Ryzen AI Max+
 
-This repository hosts a demonstration of using edge semantic segmentation for autonomous navigation with [Nav2](https://docs.nav2.org/), running on the [AMD Ryzen AI Max+](https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html) using the AMD Robotics SDK and Meta's [SAM3](https://ai.meta.com/sam3) foundation model for text-prompted instance segmentation. It turns a depth camera stream into a live, locally-run named segmentation of the robot's environment that Nav2 can reason about for **terrain- and situation-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, and handling of **dynamic obstacles** that traditional geometry-only pipelines miss.
+This repository hosts a demonstration of using generalized and edge compute segmentation for autonomous navigation with [Nav2](https://docs.nav2.org/), running on the [AMD Ryzen AI Max+](https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html) and Meta's [SAM3](https://ai.meta.com/sam3) foundation model for text-prompted semantic segmentation. It turns a camera stream into a live, locally-run named segmentation of the robot's environment that Nav2 can reason about for **terrain-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, **changing situational context**, and handling of **dynamic obstacles**, and much more.
+
+This enables applications to:
+
+  * Make trade-offs in planning and control about navigating via certain surfaces over others. For example, prefer sidewalks over grass (while strictly avoiding street), prefer wide open areas over confined aisles, avoid spills or puddles where possible, etc.
+
+  * Detect small or far away objects on the ground difficult to pick up on depth cameras or lidars, in a generalized way without having to know every possible object you may encounter
+
+  * Make decisions about the nature of the situation the robot is currently in to adjust its behavior or algorithms. For example if in confined vs open space, in an area approaching another robot/human/vehicle, or in a situation with lots of commotion.
+
+  * Find common dynamic objects without training on each specific type to remove from the static scene for dynamic tracking and/or localization improvements.
+
+  * The list goes on! If you can imagine it, it can be integrated into a behavior tree, navigation algorithm, or costmap layer. Doubly so for application-specific tasks.
 
 TODO ^ other use-cases missing
 
-This demonstrates an alternative to the Nvidia Jetson to perform state-of-the-art semantic segmentation workflows using AMD's Ryzen AI Max+ "Strix Halo" - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with powerful x86 CPU cores to boot.
+This demonstrates state-of-the-art foundation model workflows using AMD's Ryzen AI Max+ "Strix Halo" - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with 32 powerful x86 CPU cores to boot.
 
 **⚠️ Need ROS 2, Nav2, or deployment help? Contact [Open Navigation](https://www.opennav.org/)! ⚠️**
 
 TODO video of the navigation + mask (concise)
 
-SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text prompts regarding what to segment from the image ("person", "pallet", "wet floor sign", "curb", "mud", ...) and it returns per-instance masks for each. This opens up a different class of perception than classical fixed-class detectors or segmentation algorithms: the same node can be repurposed at runtime for different environments, obstacle classes, or mission objectives without retraining. Combined with Nav2's costmap plugin ecosystem, this enables navigation decisions that are driven by what the robot is actually looking at, not just generic obstacles found by depth cameras/lidars or what fits a preset number of labels.
+SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text prompts regarding what to segment from the image ("person", "pallet", "wet floor sign", "curb", "mud", "ceiling", ...) and it returns masks for each. Gone are the days of fixed detectors or segmentation algorithm classes: the same model can be used at run-time to find various environments, objects, surfaces, and more without retraining (and may be dynamically changed at run-time too!). Combining this with Nav2's costmap, behavior tree, and/or algorithm plugins, SAM3 is extremely powerful and empowers intelligent applications to be developed understanding the world more fully. This enables the robot to make decisions about navigation or behaviors driven not by obstacles but by rich semantic context.
 
 ## Package Structure
 
 This repository is layed out as the following:
 
-*  `opennav_sam3_inference`: the ROS 2 node that hosts SAM3, subscribes to a camera topic, and publishes per-instance masks as an overlay image.
+*  `opennav_sam3_inference`: the ROS 2 node optimized for Strix Halo that hosts SAM3, subscribes to a camera topic, and publishes segmentation masks as an overlay image and labeled masks for use in downstream applications.
 *   `opennav_sam3_msgs`: message and service definitions (e.g. `ChangePrompt.srv`) used to reconfigure the segmentation node at runtime.
-* `semantic_segmentation_layer`: A symlink to the semantic segmentation layer used to project the 2D segmetnation mask into the costmap frame and set relative environment costs for terrain-aware navigation and detecting small or otherwise hard-to-see obstacles
+* `semantic_segmentation_layer`: A symlink to the semantic segmentation layer used to project the 2D segmentation mask into the costmap frame and set relative environment costs for terrain-aware navigation and detecting small or otherwise hard-to-see obstacles
+
+TODO behavior tree nodes to use it? Crowded/confined/etc.
+TODO preprocessing for removing dynamic obstacles for localtzation improvements
 
 This also contains a handy `Dockerfile` containing the full ROCm, AMD PyTorch, `transformers`, & ROS 2 Jazzy stack to make it easy to use. This is setup to run on ROCm 7.2.1, but the `BASE_IMAGE` can be replaced based on your system. ROCm 7.0.0 is also common.
 
-## Demonstrations
+## Real-World Tech Demonstrations
 
 TODO
 
-Explain the task and why this is necessary to have more awareness about the terrain and difficult obstacles.
+Explain the task and why this is necessary to have more awareness about the terrain and difficult obstacles. Other TODOs?
 
 Videos:
 
@@ -41,12 +56,17 @@ Images
 
 Note: This demonstration does not showcase using the masks for dynamic obstacle segmentation for tracking or enhanced localization performance by removing dynamic obstacle measurements. Nor does it show you how you can use the masks in the behavior tree to segment context about the environment (crowdedness, confined vs open space, etc) to change behavoral characteristics. I just thought that they'd be good extensions that are easy to do building off of this 😉
 
+## TODO 
+
+section explaining the code used, arhiticture, how to use for your application
+
 
 ## SAM3 on Ryzen AI Max+
 
-The segmentation node wraps Hugging Face's `Sam3Model` / `Sam3Processor` which is downloaded and optimized on first-boot and stored for later fast start up. Expect about ~10 minutes to load the first time, afterwards under 30 seconds. 
+The segmentation node wraps Hugging Face's `Sam3Model` / `Sam3Processor` which is downloaded and optimized on first-boot and stored for later fast start up. Expect about ~10 minutes to load the first time, afterwards under 60 seconds. 
 
 TODO performance metrics in bold, if low, mention a compariable one with the Jetson instead. Add qualfications that this is server class algorithm that its impressive we can run on the edge at all.
+TODO mention proportionate to the number of prompts used, so minimize grouping any togetehr that are used together
 
 The SAM3 node publishes three outputs:
 
@@ -80,11 +100,11 @@ The following parameters are also provided:
 | `start_enabled` | `bool` | `true` | If `false`, the node loads and compiles the model but returns early from the image callback until `~/enable` is called with `data: true`. |
 | `compile_cache_path` | `string` | `/cache/sam3_compiled.pt` | Where to persist the compiled-state checkpoint between runs. Mount a host directory at `/cache` to keep it across container removals. |
 
-## Build and Run
+### Build and Run
 
 TODO probably want to fix this up so its not in a workspace at all.
 
-### Get Access to SAM3
+#### Get Access to SAM3
 
 If you have not already, you must create a hugging face account and do the following:
 
@@ -92,7 +112,7 @@ If you have not already, you must create a hugging face account and do the follo
 * Get token from https://huggingface.co/settings/tokens 
 * Export your `HF_TOKEN` to your environment (probably add to `~/.bashrc`)
 
-### Build and Run Node
+#### Build and Run Node
 
 It is recommended to use the Dockerfile to deploy the SAM3 node as it uses an AMD provided base image from the [Ryzers](https://github.com/AMDResearch/Ryzers) project which works with a respective ROCm version to setup compatible versions of key dependencies like PyTorch. This makes it easy to use without fighting with dependencies. This base image can also be used for VLMs, YOLO, LLMs, OpenCV and more.
 
