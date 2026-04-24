@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Open Navigation LLC. All rights reserved.
 
-FROM rocm/pytorch:rocm7.2.1_ubuntu24.04_py3.12_pytorch_release_2.8.0
+ARG BASE_IMAGE=rocm/pytorch:rocm7.2.1_ubuntu24.04_py3.12_pytorch_release_2.8.0
+FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=en_US.UTF-8

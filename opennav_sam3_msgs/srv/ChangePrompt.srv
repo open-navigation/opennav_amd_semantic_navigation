@@ -1,3 +1,5 @@
-string prompt
+string[] prompts
+uint16[] class_ids
 ---
 bool success
+string message

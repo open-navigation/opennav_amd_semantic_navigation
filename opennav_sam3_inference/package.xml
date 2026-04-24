@@ -10,6 +10,7 @@
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>cv_bridge</depend>
+  <depend>vision_msgs</depend>
   <depend>opennav_sam3_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>

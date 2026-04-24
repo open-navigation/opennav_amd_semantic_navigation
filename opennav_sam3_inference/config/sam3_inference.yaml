@@ -1,0 +1,11 @@
+sam3_inference:
+  ros__parameters:
+    model_name: facebook/sam3
+    prompts: ["person"]
+    class_ids: [1]
+    device: cuda
+    score_threshold: 0.5
+    mask_threshold: 0.5
+    queue_depth: 5
+    start_enabled: true
+    compile_cache_path: /cache/sam3_compiled.pt
