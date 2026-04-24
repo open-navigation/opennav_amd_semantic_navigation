@@ -1,8 +1,8 @@
 sam3_inference:
   ros__parameters:
     model_name: facebook/sam3
-    prompts: ["person"]
-    class_ids: [1]
+    prompts: ["sidewalk", "grass", "street", "car"]
+    class_ids: [1, 2, 3, 4]
     device: cuda
     score_threshold: 0.5
     mask_threshold: 0.5

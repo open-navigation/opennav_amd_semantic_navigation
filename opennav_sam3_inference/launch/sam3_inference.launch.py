@@ -28,7 +28,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'image_topic',
-            default_value='/camera/image_raw',
+            default_value='/camera/color/image_raw',
             description='Input image topic to remap onto ~/image.',
         ),
         DeclareLaunchArgument(

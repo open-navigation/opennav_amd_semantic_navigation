@@ -56,9 +56,13 @@ TORCH_SITE=$(python3 -c "import torch, os; print(os.path.dirname(os.path.dirname
 if [ -n "$TORCH_SITE" ]; then\n\
   export PYTHONPATH="$TORCH_SITE:${PYTHONPATH:-}"\n\
 fi\n\
+# Raise UDP receive buffers so DDS can keep up with raw camera images at\n\
+# 10+ Hz. Requires --privileged; with --network host this writes into the\n\
+# host namespace. Non-fatal if it fails so the node still starts.\n\
+sysctl -w net.core.rmem_max=2147483647 net.core.rmem_default=2147483647 >/dev/null 2>&1 || echo "[entrypoint] could not raise net.core.rmem_* (needs --privileged); image throughput may suffer"\n\
 . /opt/ros/jazzy/setup.bash\n\
 . /ros_ws/install/setup.bash\n\
 exec "$@"\n' > /ros_ws/entrypoint.sh && chmod +x /ros_ws/entrypoint.sh
 
 ENTRYPOINT ["/ros_ws/entrypoint.sh"]
-CMD ["ros2", "run", "opennav_sam3_inference", "sam3_node"]
+CMD ["ros2", "launch", "opennav_sam3_inference", "sam3_inference.launch.py"]

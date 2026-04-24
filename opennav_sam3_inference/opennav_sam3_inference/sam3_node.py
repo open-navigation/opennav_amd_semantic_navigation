@@ -292,7 +292,7 @@ class Sam3InferenceNode(Node):
                 if len(masks) == 0:
                     continue
                 masks_np = masks.cpu().numpy().astype(bool)
-                scores_np = scores.cpu().numpy()
+                scores_np = scores.float().cpu().numpy()
                 for mask, score in zip(masks_np, scores_np):
                     instances.append((mask, float(score), class_id))
 

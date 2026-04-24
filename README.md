@@ -105,6 +105,7 @@ docker build -t opennav_sam3_inference .
 docker run --rm -it \
     --network host \
     --ipc host \
+    --privileged \
     --shm-size 16G \
     --device=/dev/kfd --device=/dev/dri \
     -v ~/.cache/huggingface:/root/.cache/huggingface \
@@ -116,6 +117,8 @@ docker run --rm -it \
     --name sam3 \
     opennav_sam3_inference
 ```
+
+The entrypoint raises `net.core.rmem_max` / `net.core.rmem_default` at startup so DDS can keep up with raw camera images at 10+ Hz. Without larger UDP receive buffers, fragmented image packets are dropped and the subscriber sees a sparse, bursty stream. If you prefer, set these persistently on the host in `/etc/sysctl.d/` instead on your host.
 
 It is **key** that you mount the hugging face and sam3 caches so that the downloaded weights and optimized compiled models persist between docker images! Else, each run will download and optimize the model. 
 
