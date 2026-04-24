@@ -1,10 +1,10 @@
-# Open Navigation x AMD Semantic SAM3 Navigation on AMD Ryzen AI Max
+# Open Navigation x AMD Semantic SAM3 Navigation on AMD Ryzen AI Max+
 
-This repository hosts a demonstration of using edge semantic segmentation for autonomous navigation with [Nav2](https://docs.nav2.org/), running on the [AMD Ryzen AI Max](https://www.amd.com/en/products/processors/laptop/ryzen/ai-max-series.html) using the [AMD Robotics SDK](https://www.amd.com/en/developer/robotics.html) and Meta's [SAM3](https://ai.meta.com/sam3) foundation model for text-prompted instance segmentation. It turns a camera stream into a live, named segmentation of the robot's environment that Nav2 can reason about for **terrain- and situation-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, and handling of **dynamic obstacles** that traditional geometry-only pipelines miss.
+This repository hosts a demonstration of using edge semantic segmentation for autonomous navigation with [Nav2](https://docs.nav2.org/), running on the [AMD Ryzen AI Max+](https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html) using the AMD Robotics SDK and Meta's [SAM3](https://ai.meta.com/sam3) foundation model for text-prompted instance segmentation. It turns a depth camera stream into a live, locally-run named segmentation of the robot's environment that Nav2 can reason about for **terrain- and situation-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, and handling of **dynamic obstacles** that traditional geometry-only pipelines miss.
 
 TODO ^ other use-cases missing
 
-This demonstrates an alternative to the Nvidia Jetson to perform state-of-the-art semantic segmentation workflows using AMD's Ryzen AI Max "Strix Halo" - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more (with powerful AMD Ryzen CPU cores to boot).
+This demonstrates an alternative to the Nvidia Jetson to perform state-of-the-art semantic segmentation workflows using AMD's Ryzen AI Max+ "Strix Halo" - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with powerful x86 CPU cores to boot.
 
 **⚠️ Need ROS 2, Nav2, or deployment help? Contact [Open Navigation](https://www.opennav.org/)! ⚠️**
 
@@ -42,7 +42,7 @@ Images
 Note: This demonstration does not showcase using the masks for dynamic obstacle segmentation for tracking or enhanced localization performance by removing dynamic obstacle measurements. Nor does it show you how you can use the masks in the behavior tree to segment context about the environment (crowdedness, confined vs open space, etc) to change behavoral characteristics. I just thought that they'd be good extensions that are easy to do building off of this 😉
 
 
-## SAM3 on Ryzen AI Max
+## SAM3 on Ryzen AI Max+
 
 The segmentation node wraps Hugging Face's `Sam3Model` / `Sam3Processor` which is downloaded and optimized on first-boot and stored for later fast start up. Expect about ~10 minutes to load the first time, afterwards under 30 seconds. 
 
@@ -83,6 +83,16 @@ The following parameters are also provided:
 ## Build and Run
 
 TODO probably want to fix this up so its not in a workspace at all.
+
+### Get Access to SAM3
+
+If you have not already, you must create a hugging face account and do the following:
+
+* Accept license at https://huggingface.co/facebook/sam3
+* Get token from https://huggingface.co/settings/tokens 
+* Export your `HF_TOKEN` to your environment (probably add to `~/.bashrc`)
+
+### Build and Run Node
 
 It is recommended to use the Dockerfile to deploy the SAM3 node as it uses an AMD provided base image from the [Ryzers](https://github.com/AMDResearch/Ryzers) project which works with a respective ROCm version to setup compatible versions of key dependencies like PyTorch. This makes it easy to use without fighting with dependencies. This base image can also be used for VLMs, YOLO, LLMs, OpenCV and more.
 
