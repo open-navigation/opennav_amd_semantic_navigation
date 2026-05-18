@@ -5,7 +5,8 @@
 import os
 os.environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("HSA_XNACK", "1")
-os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", "/cache/inductor")
+
+import re
 
 import cv2
 import numpy as np
@@ -18,101 +19,89 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from std_srvs.srv import SetBool
-from transformers import Sam3Model, Sam3Processor
 from vision_msgs.msg import LabelInfo, VisionClass
 
-
-SAM3_INPUT_SIZE = 1008
 
 # Module-level cache so the same class_id always draws the same color
 # across frames and across prompt-reconfigurations.
 _COLOR_CACHE: dict[int, np.ndarray] = {}
 
 
-"""ROS 2 node that runs SAM3 text-prompted instance segmentation on an image topic."""
+def _infer_imgsz(onnx_dir: str) -> int:
+    """Extract resolution from onnx_dir path name (e.g. 'onnx_files_504' -> 504)."""
+    match = re.search(r'(504|1008)', os.path.basename(onnx_dir))
+    return int(match.group(1)) if match else 504
+
+
 class Sam3InferenceNode(Node):
+    """ROS 2 node that runs SAM3 text-prompted instance segmentation on an image topic.
+
+    Uses SAM3Live (streaming video model with MIGraphX acceleration) for inference.
+    """
+
     def __init__(self):
         super().__init__('sam3_inference')
 
-        self.declare_parameter('model_name', 'facebook/sam3')
+        self.declare_parameter('checkpoint', '/models/sam3')
+        self.declare_parameter('onnx_dir', '/models/onnx_files_504')
         self.declare_parameter('prompts', ['object'])
         self.declare_parameter('class_ids', [1])
         self.declare_parameter('device', 'cuda')
         self.declare_parameter('score_threshold', 0.5)
-        self.declare_parameter('mask_threshold', 0.5)
+        self.declare_parameter('max_objects_per_prompt', 5)
+        self.declare_parameter('redetect_interval_ms', 0.0)
         self.declare_parameter('queue_depth', 5)
         self.declare_parameter('start_enabled', True)
-        self.declare_parameter('compile_cache_path', '/cache/sam3_compiled.pt')
 
-        self._model_name = self.get_parameter('model_name').value
+        checkpoint = self.get_parameter('checkpoint').value
+        onnx_dir = self.get_parameter('onnx_dir').value
         prompts = list(self.get_parameter('prompts').value)
         class_ids = list(self.get_parameter('class_ids').value)
         self._prompts, self._class_ids = self._validate_prompt_config(prompts, class_ids)
+        device_param = self.get_parameter('device').value
+        device = device_param or ('cuda' if torch.cuda.is_available() else 'cpu')
         self._score_threshold = self.get_parameter('score_threshold').value
-        self._mask_threshold = self.get_parameter('mask_threshold').value
+        max_objects = self.get_parameter('max_objects_per_prompt').value
+        self._redetect_interval_ms = self.get_parameter('redetect_interval_ms').value
         queue_depth = self.get_parameter('queue_depth').value
         self._enabled = self.get_parameter('start_enabled').value
-        self._compile_cache_path = self.get_parameter('compile_cache_path').value
 
-        device_param = self.get_parameter('device').value
-        self._device = device_param or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self._dtype = torch.bfloat16 if self._device == 'cuda' else torch.float32
+        imgsz = _infer_imgsz(onnx_dir)
 
-        torch._dynamo.config.capture_scalar_outputs = True
-        if self._device == 'cuda':
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-            torch.backends.cudnn.benchmark = True
+        self.get_logger().info(
+            f'Loading SAM3 from {checkpoint} on {device} '
+            f'(imgsz={imgsz}, onnx_dir={onnx_dir})'
+        )
+
+        from .tracker.live_inference import SAM3Live
+        self._live = SAM3Live(
+            checkpoint=checkpoint,
+            prompts=self._prompts,
+            onnx_dir=onnx_dir,
+            imgsz=imgsz,
+            dtype=torch.float16,
+            device=device,
+            mig=True,
+            max_objects_per_prompt=max_objects,
+            redetect_every=1,
+        )
+
+        self._prompt_to_class_id = dict(zip(self._prompts, self._class_ids))
+
+        # ROS time-based redetection tracking
+        self._last_detect_time = self.get_clock().now()
 
         self._bridge = CvBridge()
 
-        self.get_logger().info(f'Loading {self._model_name} on {self._device} (dtype={self._dtype})')
-        self._model = Sam3Model.from_pretrained(
-            self._model_name,
-            torch_dtype=self._dtype,
-            attn_implementation='sdpa',
-        ).to(self._device)
-        self._model.eval()
-        self._model = self._model.to(memory_format=torch.channels_last)
-        self._processor = Sam3Processor.from_pretrained(self._model_name)
-
-        if os.path.exists(self._compile_cache_path):
-            self.get_logger().info(f'Loading compiled model state from {self._compile_cache_path}')
-            self._model.load_state_dict(torch.load(self._compile_cache_path, map_location=self._device))
-            self._model = torch.compile(self._model, mode='max-autotune-no-cudagraphs', fullgraph=True) # TODO -no-cudagraphs perf change?
-            self.get_logger().info('Skipping warmup compile (inductor cache should populate from TORCHINDUCTOR_CACHE_DIR)')
-        else:
-            self.get_logger().info('Compiling model (first run, this will take a few minutes)...')
-            self._model = torch.compile(self._model, mode='max-autotune-no-cudagraphs', fullgraph=True) # TODO -no-cudagraphs perf change?
-            dummy_image = np.zeros((SAM3_INPUT_SIZE, SAM3_INPUT_SIZE, 3), dtype=np.uint8)
-            warmup_probe = self._processor(images=dummy_image, text=self._prompts[0], return_tensors='pt')
-            warmup_inputs = {
-                k: (v.to(self._device) if torch.is_tensor(v) else v)
-                for k, v in warmup_probe.items()
-            }
-            with torch.inference_mode():
-                self._model(**warmup_inputs)
-            if self._device == 'cuda':
-                torch.cuda.synchronize()
-            os.makedirs(os.path.dirname(self._compile_cache_path), exist_ok=True)
-            torch.save(self._model._orig_mod.state_dict(), self._compile_cache_path)
-            self.get_logger().info(f'Saved compiled model state to {self._compile_cache_path}')
-
-        self._device_buffers = None
-        self._non_tensor = None
-
-        self.get_logger().info(f'Loaded {self._model_name} on {self._device}')
-
         self._pub = self.create_publisher(Image, '~/segmentation_mask', queue_depth)
         self._label_mask_pub = self.create_publisher(Image, '~/label_mask', queue_depth)
-        # Latched: late-joining subscribers receive the most recent mapping.
         label_info_qos = QoSProfile(
             depth=1,
             history=HistoryPolicy.KEEP_LAST,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
         self._label_info_pub = self.create_publisher(LabelInfo, '~/label_info', label_info_qos)
-        sub_qos = QoSProfile(depth=2, reliability=ReliabilityPolicy.BEST_EFFORT)
+        sub_qos = QoSProfile(depth=queue_depth, reliability=ReliabilityPolicy.BEST_EFFORT)
         self._sub = self.create_subscription(Image, '~/image', self._on_image, sub_qos)
         self._change_prompt_srv = self.create_service(
             ChangePrompt, '~/change_prompt', self._on_change_prompt
@@ -121,14 +110,12 @@ class Sam3InferenceNode(Node):
             SetBool, '~/enable', self._on_enable
         )
 
-        # Allow `score_threshold` and `mask_threshold` to be changed live via
-        # the built-in parameter service (e.g. `ros2 param set ...`).
         self.add_on_set_parameters_callback(self._on_param_update)
-
         self._publish_label_info()
 
-        self.get_logger().info(f'SAM3 model {self._model_name} ready to process, starting enabled: {self._enabled}')
-
+        self.get_logger().info(
+            f'SAM3 Inference Node ready, starting enabled: {self._enabled}'
+        )
 
     @staticmethod
     def _validate_prompt_config(prompts, class_ids):
@@ -145,7 +132,6 @@ class Sam3InferenceNode(Node):
             if not isinstance(p, str) or not p.strip():
                 raise ValueError(f'prompt must be a non-empty string, got {p!r}')
             cid_int = int(cid)
-            # 0 is reserved for "no detection" in the label mask; VisionClass.class_id is uint16.
             if cid_int <= 0 or cid_int > 65535:
                 raise ValueError(
                     f'class_id must be in [1, 65535] (0 is reserved for "no detection"), '
@@ -172,18 +158,14 @@ class Sam3InferenceNode(Node):
     def _on_param_update(self, params):
         threshold_changed = False
         for p in params:
-            if p.name in ('score_threshold', 'mask_threshold'):
+            if p.name == 'score_threshold':
                 if not isinstance(p.value, (int, float)) or not 0.0 <= float(p.value) <= 1.0:
                     reason = f'{p.name} must be in [0.0, 1.0], got {p.value}'
                     self.get_logger().warn(f'Rejected parameter update: {reason}')
                     return SetParametersResult(successful=False, reason=reason)
-                if p.name == 'score_threshold':
-                    self._score_threshold = float(p.value)
-                    self.get_logger().info(f'Setting score_threshold to {self._score_threshold}')
-                    threshold_changed = True
-                else:
-                    self._mask_threshold = float(p.value)
-                    self.get_logger().info(f'Setting mask_threshold to {self._mask_threshold}')
+                self._score_threshold = float(p.value)
+                self.get_logger().info(f'Setting score_threshold to {self._score_threshold}')
+                threshold_changed = True
         if threshold_changed:
             self._publish_label_info()
         return SetParametersResult(successful=True)
@@ -198,8 +180,10 @@ class Sam3InferenceNode(Node):
             response.success = False
             response.message = str(exc)
             return response
+        self._live.reset_prompts(prompts)
         self._prompts = prompts
         self._class_ids = class_ids
+        self._prompt_to_class_id = dict(zip(prompts, class_ids))
         self._publish_label_info()
         mapping = ', '.join(f'{n}={c}' for n, c in zip(self._prompts, self._class_ids))
         response.success = True
@@ -215,113 +199,71 @@ class Sam3InferenceNode(Node):
         response.message = f'Inference {state}'
         return response
 
+    def _should_detect(self) -> bool:
+        """Time-based detection policy using ROS clock."""
+        if self._redetect_interval_ms <= 0.0:
+            return True
+        now = self.get_clock().now()
+        elapsed_ms = (now - self._last_detect_time).nanoseconds / 1e6
+        if elapsed_ms >= self._redetect_interval_ms:
+            self._last_detect_time = now
+            return True
+        return False
+
     def _on_image(self, msg: Image):
-        self.get_logger().debug(
-            f'Received image with timestamp {msg.header.stamp.sec}.{msg.header.stamp.nanosec} and frame_id "{msg.header.frame_id}"'
+        self.get_logger().info(  # TODO back to debug
+            f'Received image with timestamp {msg.header.stamp.sec}.'
+            f'{msg.header.stamp.nanosec} and frame_id "{msg.header.frame_id}"'
         )
         if not self._enabled:
             return
         try:
-            rgb = self._bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
-            orig_h, orig_w = rgb.shape[:2]
+            bgr = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
-            scale = SAM3_INPUT_SIZE / max(orig_h, orig_w)
-            if scale < 1.0:
-                infer_image = cv2.resize(
-                    rgb,
-                    (int(round(orig_w * scale)), int(round(orig_h * scale))),
-                    interpolation=cv2.INTER_LINEAR,
-                )
-            else:
-                infer_image = rgb
-
-            # Snapshot the current prompt mapping so a mid-frame service call
-            # doesn't tear the label mask across classes.
             prompts = self._prompts
             class_ids = self._class_ids
+            prompt_to_class_id = self._prompt_to_class_id
 
-            instances = []  # list of (mask_bool: np.ndarray[H,W], score: float, class_id: int)
-            for prompt_text, class_id in zip(prompts, class_ids):
-                # We can actually prompt with any/all:
-                # - text: Text to loop for in the image
-                # - points: Lists of points and labels
-                # - boxes: Bounding boxes as localization priors
-                # - Masks: Feed previous masks to refine
-                cpu_inputs = self._processor(
-                    images=infer_image,
-                    text=prompt_text,
-                    return_tensors='pt',
-                )
+            full_detection = self._should_detect()
+            result = self._live.infer(bgr, full_detection=full_detection)
 
-                if self._device_buffers is None or any(
-                    k not in self._device_buffers or self._device_buffers[k].shape != v.shape
-                    for k, v in cpu_inputs.items() if torch.is_tensor(v)
-                ):
-                    self._device_buffers = {
-                        k: torch.empty_like(
-                            v,
-                            device=self._device,
-                            dtype=(self._dtype if v.is_floating_point() else v.dtype),
-                        )
-                        for k, v in cpu_inputs.items() if torch.is_tensor(v)
-                    }
-                    self._non_tensor = {
-                        k: v for k, v in cpu_inputs.items() if not torch.is_tensor(v)
-                    }
-                    self.get_logger().debug('Rebuilt device input buffers')
+            H, W = bgr.shape[:2]
+            label_map = np.zeros((H, W), dtype=np.uint16)
+            score_map = np.zeros((H, W), dtype=np.float32)
+            instances = []
 
-                for k, buf in self._device_buffers.items():
-                    src = cpu_inputs[k]
-                    if src.is_floating_point():
-                        src = src.to(self._dtype)
-                    buf.copy_(src, non_blocking=True)
-                inputs = {**self._non_tensor, **self._device_buffers}
+            for prompt_text, obj_ids in result['prompt_to_obj_ids'].items():
+                class_id = prompt_to_class_id.get(prompt_text, 0)
+                for oid in obj_ids:
+                    score = result['scores'][oid]
+                    if score < self._score_threshold:
+                        continue
+                    mask = result['masks'][oid]
+                    update = mask & (score > score_map)
+                    label_map[update] = class_id
+                    score_map[update] = score
+                    instances.append((mask, class_id))
 
-                with torch.inference_mode():
-                    outputs = self._model(**inputs)
-
-                results = self._processor.post_process_instance_segmentation(
-                    outputs,
-                    threshold=self._score_threshold,
-                    mask_threshold=self._mask_threshold,
-                    target_sizes=[[orig_h, orig_w]],
-                )[0]
-
-                masks = results['masks']
-                scores = results['scores']
-                if len(masks) == 0:
-                    continue
-                masks_np = masks.cpu().numpy().astype(bool)
-                scores_np = scores.float().cpu().numpy()
-                for mask, score in zip(masks_np, scores_np):
-                    instances.append((mask, float(score), class_id))
-
-            self.get_logger().debug(
+            self.get_logger().info(  # TODO back to debug
                 f'Found {len(instances)} instances across {len(prompts)} prompts'
             )
-
-            # Max-score-wins label mask (mono16).
-            label_map = np.zeros((orig_h, orig_w), dtype=np.uint16)
-            score_map = np.zeros((orig_h, orig_w), dtype=np.float32)
-            for mask, score, class_id in instances:
-                update = mask & (score > score_map)
-                label_map[update] = class_id
-                score_map[update] = score
 
             label_msg = self._bridge.cv2_to_imgmsg(label_map, encoding='mono16')
             label_msg.header = msg.header
             self._label_mask_pub.publish(label_msg)
 
             if self._pub.get_subscription_count() > 0:
-                overlay = _render_overlay(rgb, [(m, cid) for m, _, cid in instances])
+                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                overlay = _render_overlay(rgb, instances)
                 out_msg = self._bridge.cv2_to_imgmsg(overlay, encoding='rgb8')
                 out_msg.header = msg.header
                 self._pub.publish(out_msg)
-        except Exception as exc:  # pylint: disable=broad-except
+        except Exception as exc:
             self.get_logger().error(f'Segmentation failed: {exc}')
 
-        self.get_logger().debug(
-            f'Finished processing image with timestamp {msg.header.stamp.sec}.{msg.header.stamp.nanosec}'
+        self.get_logger().info(  # TODO back to debug
+            f'Finished processing image with timestamp {msg.header.stamp.sec}.'
+            f'{msg.header.stamp.nanosec}'
         )
 
 
@@ -329,7 +271,6 @@ def _color_for_class_id(class_id: int) -> np.ndarray:
     cached = _COLOR_CACHE.get(class_id)
     if cached is not None:
         return cached
-    # Floor of 64 keeps colors from being too dark to see on dark backgrounds.
     color = np.random.default_rng(class_id).integers(64, 256, size=3, dtype=np.uint8)
     _COLOR_CACHE[class_id] = color
     return color
