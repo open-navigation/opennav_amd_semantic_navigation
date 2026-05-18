@@ -10,3 +10,4 @@ sam3_inference:
     redetect_interval_ms: 0.0
     queue_depth: 5
     start_enabled: true
+    image_topic: /camera/color/image_raw
