@@ -182,6 +182,14 @@ class Sam3InferenceNode(Node):
             response.success = False
             response.message = str(exc)
             return response
+        old_n = len(self._prompts)
+        new_n = len(prompts)
+        if new_n != old_n:
+            self.get_logger().warn(
+                f'Prompt count changed to {new_n}; there will be added latency '
+                'on the next image. Wait for a fresh ~/label_mask before '
+                'assuming the new prompts are live.'
+            )
         self._live.reset_prompts(prompts)
         self._prompts = prompts
         self._class_ids = class_ids
