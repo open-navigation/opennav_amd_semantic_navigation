@@ -147,7 +147,7 @@ You should see the output files in `onnx_files_*` folder. At this point, move th
 Configure the node parameters in `sam3_inference.yaml` to ensure absolute paths to model weights and build artifacts are correctly set. Feel free to adjust other parameters as well following the parameters table above.
 
 
-Build just this package in the conda environment used for the setup script.
+Build this package in the conda environment used for the setup script to use the correct environment.
 
 ```bash
 conda activate sam3-tracker # Or the a different environment name used in setup.sh script
