@@ -126,7 +126,7 @@ cd <workspace>/src/opennav_amd_samantic_sam3_navigation/opennav_sam3_inference/
 
 Without any modifiers, the script will install ROCm, migraphx, setup Python dependencies in `opennav-sam3-inference` conda environment, and downloads the model weights to `/mode/sam3/` folder in the same directory used to run the script.
 
-> The setup script provides two options to either obtain SAM3 weights from the official repository or from a community mirror, either of them works fine.
+Note: The setup script provides two options to either obtain SAM3 weights from the official repository or from a community mirror, either of them works fine.
 
 Then the build model artifacts for a specific resolution/pipeline which takes a few minutes
 
