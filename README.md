@@ -140,7 +140,7 @@ python export/build.py --pipeline text --imgsz 504
 python export/build.py --pipeline text --imgsz 504 1008
 ```
 
-You should see the output files in `onnx_files_*` folder.
+You should see the output files in `onnx_files_*` folder. At this point, move the model and onnx files to a directory on your computer to persist and use for inference.
 
 #### Build and Run Node
 
