@@ -4,9 +4,10 @@
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from launch.actions import SetEnvironmentVariable
 
 
 def generate_launch_description():
@@ -17,10 +18,27 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     image_topic = LaunchConfiguration('image_topic')
     segmentation_topic = LaunchConfiguration('segmentation_topic')
+    label_mask_topic = LaunchConfiguration('label_mask_topic')
     namespace = LaunchConfiguration('namespace')
     log_level = LaunchConfiguration('log_level')
 
     return LaunchDescription([
+        SetEnvironmentVariable(
+            name='LD_LIBRARY_PATH',
+            value=[
+                '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
+                '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0:',
+                EnvironmentVariable('LD_LIBRARY_PATH', default_value=''),
+            ],
+        ),
+        SetEnvironmentVariable(
+            name='PYTHONPATH',
+            value=[
+                '/opt/rocm-7.2.0/lib:',
+                EnvironmentVariable('PYTHONPATH', default_value=''),
+            ],
+        ),
+
         DeclareLaunchArgument(
             'params_file',
             default_value=default_params,
@@ -34,7 +52,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'segmentation_topic',
             default_value='/sam3/segmentation_mask',
-            description='Output topic to remap onto ~/segmentation_mask.',
+            description='Output segmentation mask topic to remap onto ~/segmentation_mask.',
+        ),
+        DeclareLaunchArgument(
+            'label_mask_topic',
+            default_value='/sam3/label_mask',
+            description='Output label mask topic to remap onto ~/label_mask.',
         ),
         DeclareLaunchArgument(
             'namespace',
@@ -57,7 +80,11 @@ def generate_launch_description():
             remappings=[
                 ('~/image', image_topic),
                 ('~/segmentation_mask', segmentation_topic),
+                ('~/label_mask', label_mask_topic),
             ],
+            additional_env={
+                'LD_PRELOAD': '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
+                '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0'},
             arguments=['--ros-args', '--log-level', log_level],
         ),
     ])
