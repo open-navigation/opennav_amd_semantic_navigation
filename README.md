@@ -154,7 +154,7 @@ conda activate sam3-tracker # Or the a different environment name used in setup.
 colcon build --packages-select opennav_sam3_inference
 conda deactivate 
 
-Now you can source the workspace as usual and launch the inference node
+Now you can source the workspace as usual and launch the inference node, even outside of the conda environment!
 
 ```bash
 ros2 launch opennav_sam3_inference sam3_inference.launch.py image_topic:=/my_camera/image_raw
