@@ -121,7 +121,6 @@ Setup a recent version of `conda` / `miniforge`. Check out ([miniforge repo](htt
 
 ```bash
 cd <workspace>/src/opennav_amd_samantic_sam3_navigation/opennav_sam3_inference/
-
 ./setup.sh
 ```
 
