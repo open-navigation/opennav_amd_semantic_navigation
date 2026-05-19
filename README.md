@@ -160,7 +160,6 @@ Now you can source the workspace as usual and launch the inference node, even ou
 ros2 launch opennav_sam3_inference sam3_inference.launch.py image_topic:=/my_camera/image_raw
 ```
 
-Segmentation and label mask topics are set to `~/segmentation_mask` and `~/label_mask` respectively by default, but can be remapped as needed.
 
 ## Related Projects
 
