@@ -72,7 +72,7 @@ The SAM3 node publishes three outputs:
 
 | Topic | Type | Description |
 | --- | --- | --- |
-| `~/label_mask` | `sensor_msgs/Image` (`mono16`) | Pixel value = `class_id` of the top-scoring class at that pixel; `0` means no detection. |
+| `~/label_mask` | `sensor_msgs/Image` (`mono8`) | Pixel value = `class_id` of the top-scoring class at that pixel; `0` means no detection. |
 | `~/label_info` | `vision_msgs/LabelInfo` | Maps `class_id` to `class_name` for use of `label_mask` downstream. |
 | `~/segmentation_mask` | `sensor_msgs/Image` (`rgb8`) | Per-class-tinted overlay of the source frame for validation. Colors are deterministic per `class_id` |
 
@@ -92,7 +92,7 @@ The following parameters are also provided:
 | --- | --- | --- | --- |
 | `model_name` | `string` | `facebook/sam3` | Hugging Face repo ID for the SAM3 checkpoint. Must be one your `HF_TOKEN` has access to. |
 | `prompts` | `string[]` | `["object"]` | Text prompts to segment. Must be the same length as `class_ids`, with no duplicate entries. Swappable at runtime via the `~/change_prompt` service. |
-| `class_ids` | `uint16[]` | `[1]` | Parallel array of class IDs for `prompts`. Each ID is written into the `~/label_mask` output at pixels belonging to that class and echoed in `~/label_info`. Must be in `[1, 65535]` (0 is reserved for "no detection") and unique. |
+| `class_ids` | `uint16[]` | `[1]` | Parallel array of class IDs for `prompts`. Each ID is written into the `~/label_mask` output at pixels belonging to that class and echoed in `~/label_info`. Must be in `[1, 255]` (0 is reserved for "no detection") and unique. |
 | `device` | `string` | `cuda` | Torch device string. `cuda` is correct on ROCm (PyTorch reuses the CUDA device namespace for HIP). Falls back to `cpu` if no accelerator is available. |
 | `score_threshold` | `double` | `0.5` | Minimum confidence score for a detected instance to be emitted. Live-editable, validated to `[0.0, 1.0]`. Echoed in `~/label_info.threshold`. |
 | `mask_threshold` | `double` | `0.5` | Per-pixel threshold applied when binarizing the predicted mask. Live-editable, validated to `[0.0, 1.0]`. |

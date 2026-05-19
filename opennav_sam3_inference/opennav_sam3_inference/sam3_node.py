@@ -134,9 +134,9 @@ class Sam3InferenceNode(Node):
             if not isinstance(p, str) or not p.strip():
                 raise ValueError(f'prompt must be a non-empty string, got {p!r}')
             cid_int = int(cid)
-            if cid_int <= 0 or cid_int > 65535:
+            if cid_int <= 0 or cid_int > 255:
                 raise ValueError(
-                    f'class_id must be in [1, 65535] (0 is reserved for "no detection"), '
+                    f'class_id must be in [1, 255] (0 is reserved for "no detection"), '
                     f'got {cid_int} for prompt {p!r}'
                 )
             normalized_prompts.append(p.strip())
@@ -238,7 +238,7 @@ class Sam3InferenceNode(Node):
             result = self._live.infer(bgr, full_detection=full_detection)
 
             H, W = bgr.shape[:2]
-            label_map = np.zeros((H, W), dtype=np.uint16)
+            label_map = np.zeros((H, W), dtype=np.uint8)
             score_map = np.zeros((H, W), dtype=np.float32)
             instances = []
 
@@ -258,7 +258,7 @@ class Sam3InferenceNode(Node):
                 f'Found {len(instances)} instances across {len(prompts)} prompts'
             )
 
-            label_msg = self._bridge.cv2_to_imgmsg(label_map, encoding='mono16')
+            label_msg = self._bridge.cv2_to_imgmsg(label_map, encoding='mono8')
             label_msg.header = msg.header
             self._label_mask_pub.publish(label_msg)
 
