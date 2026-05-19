@@ -68,7 +68,7 @@ TODO mention proportionate to the number of prompts used, so minimize grouping a
 
 TODO: Fill the table
 
-| Prompts | Detect every frame | Detect every 5 frames |
+| Prompts | New detect every frame | New Detect every 1s, track between |
 | ------- | ------------------ | --------------------- |
 | 1       |                    |                       |
 | 2       |                    |                       |
