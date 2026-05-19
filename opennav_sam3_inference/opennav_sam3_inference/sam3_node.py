@@ -42,8 +42,8 @@ class Sam3InferenceNode(Node):
     def __init__(self):
         super().__init__('sam3_inference')
 
-        self.declare_parameter('checkpoint', '/models/sam3')
-        self.declare_parameter('onnx_dir', '/models/onnx_files_504')
+        self.declare_parameter('checkpoint', 'models/sam3')
+        self.declare_parameter('onnx_dir', 'onnx_files_504')
         self.declare_parameter('prompts', ['object'])
         self.declare_parameter('class_ids', [1])
         self.declare_parameter('device', 'cuda')
@@ -52,7 +52,6 @@ class Sam3InferenceNode(Node):
         self.declare_parameter('redetect_interval_ms', 0.0)
         self.declare_parameter('queue_depth', 5)
         self.declare_parameter('start_enabled', True)
-        self.declare_parameter('image_topic', '/camera/color/image_raw')
 
         checkpoint = self.get_parameter('checkpoint').value
         onnx_dir = self.get_parameter('onnx_dir').value
@@ -66,7 +65,6 @@ class Sam3InferenceNode(Node):
         self._redetect_interval_ms = self.get_parameter('redetect_interval_ms').value
         queue_depth = self.get_parameter('queue_depth').value
         self._enabled = self.get_parameter('start_enabled').value
-        image_topic = self.get_parameter('image_topic').value
 
         imgsz = _infer_imgsz(onnx_dir)
 
@@ -75,7 +73,7 @@ class Sam3InferenceNode(Node):
             f'(imgsz={imgsz}, onnx_dir={onnx_dir})'
         )
 
-        from .tracker.live_inference import SAM3Live
+        from opennav_sam3_inference.tracker.live_inference import SAM3Live
         self._live = SAM3Live(
             checkpoint=checkpoint,
             prompts=self._prompts,
@@ -104,7 +102,7 @@ class Sam3InferenceNode(Node):
         )
         self._label_info_pub = self.create_publisher(LabelInfo, '~/label_info', label_info_qos)
         sub_qos = QoSProfile(depth=queue_depth, reliability=ReliabilityPolicy.BEST_EFFORT)
-        self._sub = self.create_subscription(Image, image_topic, self._on_image, sub_qos)
+        self._sub = self.create_subscription(Image, '~/image', self._on_image, sub_qos)
         self._change_prompt_srv = self.create_service(
             ChangePrompt, '~/change_prompt', self._on_change_prompt
         )

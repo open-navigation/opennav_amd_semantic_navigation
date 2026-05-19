@@ -22,7 +22,7 @@ This demonstrates state-of-the-art foundation model workflows using AMD's Ryzen 
 
 TODO video of the navigation + mask (concise)
 
-SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text prompts regarding what to segment from the image ("person", "pallet", "wet floor sign", "curb", "mud", "ceiling", ...) and it returns masks for each. Gone are the days of fixed detectors or segmentation algorithm classes: the same model can be used at run-time to find various environments, objects, surfaces, and more without retraining (and may be dynamically changed at run-time too!). Combining this with Nav2's costmap, behavior tree, and/or algorithm plugins, SAM3 is extremely powerful and empowers intelligent applications to be developed understanding the world more fully. This enables the robot to make decisions about navigation or behaviors driven not by obstacles but by rich semantic context.
+SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text prompts regarding what to segment from the image ("person", "pallet", "wet floor sign", "curb", "mud", "ceiling", ...) and it returns masks for each class and ID of each object within a class. Gone are the days of fixed detectors or segmentation algorithm classes: the same model can be used at run-time to find various environments, objects, surfaces, and more without retraining (and may be dynamically changed at run-time too!). Combining this with Nav2's costmap, behavior tree, and/or algorithm plugins, SAM3 is extremely powerful and empowers intelligent applications to be developed understanding the world more fully. This enables the robot to make decisions about navigation or behaviors driven not by obstacles but by rich semantic context.
 
 ## Package Structure
 
@@ -34,8 +34,6 @@ This repository is layed out as the following:
 
 TODO behavior tree nodes to use it? Crowded/confined/etc.
 TODO preprocessing for removing dynamic obstacles for localtzation improvements
-
-This also contains a handy `Dockerfile` containing the full ROCm, AMD PyTorch, `transformers`, & ROS 2 Jazzy stack to make it easy to use. This is setup to run on ROCm 7.2.1, but the `BASE_IMAGE` can be replaced based on your system. ROCm 7.0.0 is also common.
 
 ## Real-World Tech Demonstrations
 
@@ -63,10 +61,18 @@ section explaining the code used, arhiticture, how to use for your application
 
 ## SAM3 on Ryzen AI Max+
 
-The segmentation node wraps Hugging Face's `Sam3Model` / `Sam3Processor` which is downloaded and optimized on first-boot and stored for later fast start up. Expect about ~10 minutes to load the first time, afterwards under 60 seconds. 
+The segmentation node wraps SAM3 model that could either be downloaded from Hugging Face or from community through the provided setup script. In addition, some artifacts for optimization are also leveraged for better peformance.
 
-TODO performance metrics in bold, if low, mention a compariable one with the Jetson instead. Add qualfications that this is server class algorithm that its impressive we can run on the edge at all.
-TODO mention proportionate to the number of prompts used, so minimize grouping any togetehr that are used together
+<!-- TODO performance metrics in bold, if low, mention a compariable one with the Jetson instead. Add qualfications that this is server class algorithm that its impressive we can run on the edge at all.
+TODO mention proportionate to the number of prompts used, so minimize grouping any togetehr that are used together -->
+
+TODO: Fill the table
+
+| Prompts | New detect every frame | New Detect every 1s, track between |
+| ------- | ------------------ | --------------------- |
+| 1       |                    |                       |
+| 2       |                    |                       |
+| 4       |                    |                       |
 
 The SAM3 node publishes three outputs:
 
@@ -90,7 +96,8 @@ The following parameters are also provided:
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `model_name` | `string` | `facebook/sam3` | Hugging Face repo ID for the SAM3 checkpoint. Must be one your `HF_TOKEN` has access to. |
+| `checkpoint` | `string` | `path/to/sam3/model` | Path containing SAM3 model weights `model.safetensors` file |
+| `onnx_dir` | `string` | `path/to/onnx/files` | Build artifacts with optimizations consisting ONNX files |
 | `prompts` | `string[]` | `["object"]` | Text prompts to segment. Must be the same length as `class_ids`, with no duplicate entries. Swappable at runtime via the `~/change_prompt` service. |
 | `class_ids` | `uint16[]` | `[1]` | Parallel array of class IDs for `prompts`. Each ID is written into the `~/label_mask` output at pixels belonging to that class and echoed in `~/label_info`. Must be in `[1, 255]` (0 is reserved for "no detection") and unique. |
 | `device` | `string` | `cuda` | Torch device string. `cuda` is correct on ROCm (PyTorch reuses the CUDA device namespace for HIP). Falls back to `cpu` if no accelerator is available. |
@@ -98,11 +105,8 @@ The following parameters are also provided:
 | `mask_threshold` | `double` | `0.5` | Per-pixel threshold applied when binarizing the predicted mask. Live-editable, validated to `[0.0, 1.0]`. |
 | `queue_depth` | `int` | `5` | History depth for the `~/segmentation` and `~/label_mask` publishers. The `~/image` subscription uses a fixed `depth=2`, `BEST_EFFORT` profile so stale frames are dropped — real-time perception wants latest-frame-wins. |
 | `start_enabled` | `bool` | `true` | If `false`, the node loads and compiles the model but returns early from the image callback until `~/enable` is called with `data: true`. |
-| `compile_cache_path` | `string` | `/cache/sam3_compiled.pt` | Where to persist the compiled-state checkpoint between runs. Mount a host directory at `/cache` to keep it across container removals. |
-
-### Build and Run
-
-TODO probably want to fix this up so its not in a workspace at all.
+| `max_objects_per_prompt` | `int` | `5` | Cap on simultaneously tracked objects per prompt. Excess (lowest score) are evicted via session.remove_object so the tracker stops propagating them. |
+| `redetect_every` | `int` | `1` | Does the full SAM3 detection after the given number of frames to ensure new objects/people are detected over time. All the intermediate frames does tracker propagation on just the previous detections |
 
 #### Get Access to SAM3
 
@@ -110,45 +114,53 @@ If you have not already, you must create a hugging face account and do the follo
 
 * Accept license at https://huggingface.co/facebook/sam3
 * Get token from https://huggingface.co/settings/tokens 
-* Export your `HF_TOKEN` to your environment (probably add to `~/.bashrc`)
+
+#### Install Dependencies and Setup Model
+
+Setup a recent version of `conda` / `miniforge`. Check out ([miniforge repo](https://github.com/conda-forge/miniforge)) for installation steps. Then, run the `setup.sh` script to set up the Python, ROCm, and other important dependencies, including model weights:
+
+```bash
+cd <workspace>/src/opennav_amd_samantic_sam3_navigation/opennav_sam3_inference/
+./setup.sh
+```
+
+Without any modifiers, the script will install ROCm, migraphx, setup Python dependencies in `opennav-sam3-inference` conda environment, and downloads the model weights to `/mode/sam3/` folder in the same directory used to run the script.
+
+Note: The setup script provides two options to either obtain SAM3 weights from the official repository or from a community mirror, either of them works fine.
+
+Then the build model artifacts for a specific resolution/pipeline which takes a few minutes
+
+```bash
+conda activate opennav-sam3-inference
+
+# Text-prompt (~18 min @504px)
+python export/build.py --pipeline text --imgsz 504
+
+# Both resolutions (~45 min total)
+python export/build.py --pipeline text --imgsz 504 1008
+```
+
+You should see the output files in `onnx_files_*` folder. At this point, move the model and onnx files to a directory on your computer to persist and use for inference.
 
 #### Build and Run Node
 
-It is recommended to use the Dockerfile to deploy the SAM3 node as it uses an AMD provided base image from the [Ryzers](https://github.com/AMDResearch/Ryzers) project which works with a respective ROCm version to setup compatible versions of key dependencies like PyTorch. This makes it easy to use without fighting with dependencies. This base image can also be used for VLMs, YOLO, LLMs, OpenCV and more.
+Configure the node parameters in `sam3_inference.yaml` to ensure absolute paths to model weights and build artifacts are correctly set. Feel free to adjust other parameters as well following the parameters table above.
 
-This assumes your `HF_TOKEN` is set as an environmental variable (from your `~/.bashrc` for instance)
 
-```bash
-cd ~/ros2_ws/src/opennav_sam3_inference
-docker build -t opennav_sam3_inference .
-
-docker run --rm -it \
-    --network host \
-    --ipc host \
-    --privileged \
-    --shm-size 16G \
-    --device=/dev/kfd --device=/dev/dri \
-    -v ~/.cache/huggingface:/root/.cache/huggingface \
-    -v ~/.cache/sam3:/cache \
-    --group-add video --group-add render \
-    --security-opt seccomp=unconfined \
-    --cap-add=SYS_PTRACE \
-    -e HF_TOKEN=$HF_TOKEN \
-    --name sam3 \
-    opennav_sam3_inference
-```
-
-The entrypoint raises `net.core.rmem_max` / `net.core.rmem_default` at startup so DDS can keep up with raw camera images at 10+ Hz. Without larger UDP receive buffers, fragmented image packets are dropped and the subscriber sees a sparse, bursty stream. If you prefer, set these persistently on the host in `/etc/sysctl.d/` instead on your host.
-
-It is **key** that you mount the hugging face and sam3 caches so that the downloaded weights and optimized compiled models persist between docker images! Else, each run will download and optimize the model. 
-
-The entrypoint will automatically launch the node using the provided launch file and configuration. Override this with `bash` at the end of the command to open a terminal in the docker image. There you could manually run via:
+Build this package in the conda environment used for the setup script to use the correct environment.
 
 ```bash
-    ros2 launch opennav_sam3_inference sam3_inference.launch.py \
-        image_topic:=/my_camera/image_raw \
-        segmentation_topic:=/sam3/segmentation
+conda activate sam3-tracker # Or the a different environment name used in setup.sh script
+colcon build --packages-select opennav_sam3_inference
+conda deactivate
 ```
+
+Now you can source the workspace as usual and launch the inference node, even outside of the conda environment!
+
+```bash
+ros2 launch opennav_sam3_inference sam3_inference.launch.py image_topic:=/my_camera/image_raw
+```
+
 
 ## Related Projects
 

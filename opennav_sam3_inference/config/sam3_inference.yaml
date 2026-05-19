@@ -1,7 +1,7 @@
 sam3_inference:
   ros__parameters:
-    checkpoint: /models/sam3
-    onnx_dir: /models/onnx_files_504
+    checkpoint: /home/administrator/opennav-sam3-inference-models/sam3  # Absolute path to the SAM3 checkpoint
+    onnx_dir: /home/administrator/opennav-sam3-inference-models/onnx_files_504  # Absolute path to the directory containing ONNX files
     prompts: ["sidewalk", "grass", "street", "car"]
     class_ids: [1, 2, 3, 4]
     device: cuda
@@ -10,4 +10,3 @@ sam3_inference:
     redetect_interval_ms: 0.0
     queue_depth: 5
     start_enabled: true
-    image_topic: /camera/color/image_raw
