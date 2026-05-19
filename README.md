@@ -152,7 +152,8 @@ Build this package in the conda environment used for the setup script to use the
 ```bash
 conda activate sam3-tracker # Or the a different environment name used in setup.sh script
 colcon build --packages-select opennav_sam3_inference
-conda deactivate 
+conda deactivate
+```
 
 Now you can source the workspace as usual and launch the inference node, even outside of the conda environment!
 
