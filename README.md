@@ -6,23 +6,29 @@ This enables applications to:
 
   * Make trade-offs in planning and control about navigating via certain surfaces over others. For example, prefer sidewalks over grass (while strictly avoiding street), prefer wide open areas over confined aisles, avoid spills or puddles where possible, etc.
 
-  * Detect small or far away objects on the ground difficult to pick up on depth cameras or lidars, in a generalized way without having to know every possible object you may encounter
+  * Detect small objects on the ground or far away objects difficult to pick up on depth cameras or lidars, in a generalized way without having to know every possible object you may encounter
 
-  * Make decisions about the nature of the situation the robot is currently in to adjust its behavior or algorithms. For example if in confined vs open space, in an area approaching another robot/human/vehicle, or in a situation with lots of commotion.
+  * Make decisions about the nature of the situation the robot is currently in to adjust its behavior or algorithms. For example if in confined vs open space, in an area approaching another robot/human/vehicle, or in a situation with lots of commotion. Might be useful in behavior trees ;-) 
 
   * Find common dynamic objects without training on each specific type to remove from the static scene for dynamic tracking and/or localization improvements.
 
   * The list goes on! If you can imagine it, it can be integrated into a behavior tree, navigation algorithm, or costmap layer. Doubly so for application-specific tasks.
 
-TODO ^ other use-cases missing
-
-This demonstrates state-of-the-art foundation model workflows using AMD's Ryzen AI Max+ "Strix Halo" - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with 32 powerful x86 CPU cores to boot. The newest generations of AI-enabled processors are absolutely amazing for robotics (NPU, GPU, FPGA, 32x x86 cores) workloads without needing to purchase a robotics-specific SOM.
+This demonstrates state-of-the-art foundation model workflows using AMD's Ryzen AI Max+ "Strix Halo" or X100 - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with 32 powerful x86 CPU cores to boot. The newest generations of AI-enabled processors are absolutely amazing for robotics (NPU, GPU, FPGA, 32x x86 cores) workloads without needing to purchase a robotics-specific SOM.
 
 **⚠️ Need ROS 2, Nav2, or deployment help? Contact [Open Navigation](https://www.opennav.org/)! ⚠️**
 
 TODO video of the navigation + mask (concise)
 
 SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text prompts regarding what to segment from the image ("person", "pallet", "wet floor sign", "curb", "mud", "ceiling", ...) and it returns masks for each class and ID of each object within a class. Gone are the days of fixed detectors or segmentation algorithm classes: the same model can be used at run-time to find various environments, objects, surfaces, and more without retraining (and may be dynamically changed at run-time too!). Combining this with Nav2's costmap, behavior tree, and/or algorithm plugins, SAM3 is extremely powerful and empowers intelligent applications to be developed understanding the world more fully. This enables the robot to make decisions about navigation or behaviors driven not by obstacles but by rich semantic context.
+
+TODO: Fill the table
+
+| Prompts | New detect every frame | New Detect every 1s, track between |
+| ------- | ------------------ | --------------------- |
+| 1       |                    |                       |
+| 2       |                    |                       |
+| 4       |                    |                       |
 
 ## Package Structure
 
@@ -32,8 +38,7 @@ This repository is layed out as the following:
 *   `opennav_sam3_msgs`: message and service definitions (e.g. `ChangePrompt.srv`) used to reconfigure the segmentation node at runtime.
 * `semantic_segmentation_layer`: A symlink to the semantic segmentation layer used to project the 2D segmentation mask into the costmap frame and set relative environment costs for terrain-aware navigation and detecting small or otherwise hard-to-see obstacles
 
-TODO behavior tree nodes to use it? Crowded/confined/etc.
-TODO preprocessing for removing dynamic obstacles for localtzation improvements
+The demonstration software used is in the main [Honeybee repository](https://github.com/open-navigation/opennav_amd_demonstrations), so this repository only contains the general software useful for integrating SAM3 into an arbitrary robot application. See that project for Nav2 configurations, the demonstration autonomy applications, and related.
 
 ## Real-World Tech Demonstrations
 
@@ -47,34 +52,28 @@ Videos:
 
   * Robot navigating terrains and avoiding small or dfficult obstacles using this
 
-Images
 
-  * Infographic of the pipeline
+## Integration Architecture
 
+The pipeline follows a straightforward data flow from camera to costmap, as shown below:
 
-Note: This demonstration does not showcase using the masks for dynamic obstacle segmentation for tracking or enhanced localization performance by removing dynamic obstacle measurements. Nor does it show you how you can use the masks in the behavior tree to segment context about the environment (crowdedness, confined vs open space, etc) to change behavoral characteristics. I just thought that they'd be good extensions that are easy to do building off of this 😉
+![Architecture Diagram](docs/diagram.png)
 
-## TODO 
+The only requirement is that the camera images are aligned and reasonably synchronized with the pointcloud, thus a standard depth camera is recommended. The resolutions should also match before passing into the costmap layer, however a high quality camera image with lower-resolution depth can work if an additional stage after the SAM3 node is used to decimate the `~/label_mask` image to the pointcloud's size.
 
-section explaining the code used, arhiticture, how to use for your application
+The SAM3 node will output a label mask and semantic overlay (for debugging) containing the detected text prompts. The node can process multiple different text prompts to detect many different classes, however the performance will drop proportionate to the number of text prompts. Conveniently, prompts can be arbitrarily long, so a single one may represent multiple different classes as long as you want to treat them the same.
 
+For example:
+* `["grass", "sidewalk", "car", "street", "bicycle"]` is 5 prompts that will each be assigned specific classes
+* `["person or bicycle", "car, bus, plane, motorcycle", "grass, sidewalk, street, or parking lot"]` would only be 3 prompts but represent multiple physical classes as a single class ID 
+
+Once the semantic data is in the costmap layer, the costmap costs used by planning, control, and behavior algorithms will be adjusted based on the cost to traverse a particular terrain class (from none, to some, to illegal). This incentivizes the robot to select terrains to plan through or select trajectories within based on your desired behavioral characteristics. 
+
+Note that once the semantic mask is available, any application can use it as well for things like behavior enhancement, localization pipelines, extracting dynamic obstacles for tracking and so forth. This is a demonstration of one such pipeline using it for terrain-aware navigation.
 
 ## SAM3 on Ryzen AI Max+
 
-The segmentation node wraps SAM3 model that could either be downloaded from Hugging Face or from community through the provided setup script. In addition, some artifacts for optimization are also leveraged for better peformance.
-
-<!-- TODO performance metrics in bold, if low, mention a compariable one with the Jetson instead. Add qualfications that this is server class algorithm that its impressive we can run on the edge at all.
-TODO mention proportionate to the number of prompts used, so minimize grouping any togetehr that are used together -->
-
-TODO: Fill the table
-
-| Prompts | New detect every frame | New Detect every 1s, track between |
-| ------- | ------------------ | --------------------- |
-| 1       |                    |                       |
-| 2       |                    |                       |
-| 4       |                    |                       |
-
-The SAM3 node publishes three outputs:
+The SAM3 semantic segmentation node publishes three outputs:
 
 | Topic | Type | Description |
 | --- | --- | --- |
@@ -164,5 +163,6 @@ ros2 launch opennav_sam3_inference sam3_inference.launch.py image_topic:=/my_cam
 
 ## Related Projects
 
-*   [opennav_amd_demonstrations](https://github.com/open-navigation/opennav_amd_demonstrations) — companion project demonstrating indoor 2D, urban 3D, and outdoor GPS-based navigation on Ryzen AI with the Honeybee reference platform.
-*   [Nav2](https://github.com/ros-navigation/navigation2) — the ROS 2 navigation stack this work plugs into.
+*   [opennav_amd_demonstrations](https://github.com/open-navigation/opennav_amd_demonstrations): companion project demonstrating indoor 2D, urban 3D, outdoor GPS-based navigation, and now semantic segmentation navigation on Ryzen AI / AI Max+ computers with the Honeybee reference platform.
+*   [Nav2](https://github.com/ros-navigation/navigation2): the ROS 2 navigation stack this work plugs into.
+*   [Ryzers](https://github.com/AMDResearch/Ryzers): Pre-configured and optimized docker images for AI on AMD GPUs

@@ -1,0 +1,4 @@
+[submodule "semantic_segmentation_layer"]
+	path = semantic_segmentation_layer
+	url = https://github.com/kiwicampus/semantic_segmentation_layer
+	branch = jazzy
