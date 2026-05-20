@@ -18,7 +18,7 @@ This demonstrates state-of-the-art foundation model workflows using AMD's Ryzen 
 
 **⚠️ Need ROS 2, Nav2, or deployment help? Contact [Open Navigation](https://www.opennav.org/)! ⚠️**
 
-TODO video of the navigation + mask (concise)
+TODO video of the navigation + mask (concise) / drone???
 
 SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text prompts regarding what to segment from the image ("person", "pallet", "wet floor sign", "curb", "mud", "ceiling", ...) and it returns masks for each class and ID of each object within a class. Gone are the days of fixed detectors or segmentation algorithm classes: the same model can be used at run-time to find various environments, objects, surfaces, and more without retraining (and may be dynamically changed at run-time too!). Combining this with Nav2's costmap, behavior tree, and/or algorithm plugins, SAM3 is extremely powerful and empowers intelligent applications to be developed understanding the world more fully. This enables the robot to make decisions about navigation or behaviors driven not by obstacles but by rich semantic context.
 
@@ -42,16 +42,49 @@ The demonstration software used is in the main [Honeybee repository](https://git
 
 ## Real-World Tech Demonstrations
 
-TODO
+This demonstration shows **terrain-aware navigation** using SAM3's semantic segmentation to give the robot a rich understanding of the surfaces and objects around it. This provides context and intelligence far beyond what a depth camera or lidar alone can provide.
 
-Explain the task and why this is necessary to have more awareness about the terrain and difficult obstacles. Other TODOs?
+Traditional depth-only perception tells you where obstacles are, but not what they are or how you should treat it. It also struggles with small or thin obstacles (cables, low curbs, debris) and distant objects beyond its effective range. Semantic segmentation fills this gap by labeling every pixel with what it actually is, even in situations where depth is out of range.
 
-Videos:
+With terrain labels in the costmap, the robot can:
 
+* **Prefer certain surfaces over others**: plan through sidewalks instead of grass, stay on a gravel path or trail, strictly avoid streets or restricted areas.
+* **Detect small or hard-to-see obstacles**: thin poles, low-profile objects on the ground, puddles, holes, or items at distances beyond typical stereo/ToF range in a generalized way without training a detector or segmentation model for each one.
+* **Distinguish objects apart**: detect particular objects and treat them differently in a perception pipeline (also localization or behavioral pipeline)
+
+This demonstration is performed in a few unique cases to showcase the value of terrain segmentation. In each, we configure the SAM3 inference node & semantic segmentation layer with slightly different prompts and costs. We can do so without any fine-tuning or retraining to segment out the surfaces or objects of interest in each. 
+
+1. TODO NAME (S curve Precita sidewalk/grass [odometric navigation] OR following the sidewalk, keep sending a goal ahead by 10m on sidewalk pixel -- useable below. Panhandle path?) NO DRONE
+
+TODO short description
+
+TODO what we segment, relative costs
+
+2. TODO NAME (alameda bike lane or driveway vs street / curb OR humble sea sidewalk/sand shimmy OR 4-square plaza). DRONE + dataset masks. 
+
+TODO short description
+
+TODO what we segment, relative costs
+
+3. TODO NAME (winery vineyard? hiking trail? )
+
+TODO short description
+
+TODO what we segment, relative costs
+
+4. Datasets segmenting for inspiration TODO
+  * TODO Polymath Office: chairs, desks, people, dogs, etc
+  * TODO
+  * TODO
+
+
+TODO Video matrix + glamor shot:
   * SAM3 in the environment mask
-
   * Robot navigating terrains and avoiding small or dfficult obstacles using this
 
+
+
+Note that there are many uses of semantic data from SAM3. Applications can use it for things like behavior enhancement based on situational awareness, localization pipeline improvement, extracting dynamic obstacles for tracking, and so forth. This demonstration of one such pipeline using it for terrain-aware navigation.
 
 ## Integration Architecture
 
@@ -59,7 +92,7 @@ The pipeline follows a straightforward data flow from camera to costmap, as show
 
 ![Architecture Diagram](docs/diagram.png)
 
-The only requirement is that the camera images are aligned and reasonably synchronized with the pointcloud, thus a standard depth camera is recommended. The resolutions should also match before passing into the costmap layer, however a high quality camera image with lower-resolution depth can work if an additional stage after the SAM3 node is used to decimate the `~/label_mask` image to the pointcloud's size.
+The only requirement is that the camera images are undistorted and aligned / synchronized with the pointcloud, thus a standard depth camera is recommended. This uses an Orbecc camera with camera undistortion enabled. The resolutions should also match before passing into the costmap layer, however a high quality camera image with lower-resolution depth can work if using the SAM3 node's decimate on the `~/label_mask` image to the pointcloud's size.
 
 The SAM3 node will output a label mask and semantic overlay (for debugging) containing the detected text prompts. The node can process multiple different text prompts to detect many different classes, however the performance will drop proportionate to the number of text prompts. Conveniently, prompts can be arbitrarily long, so a single one may represent multiple different classes as long as you want to treat them the same.
 
@@ -68,8 +101,6 @@ For example:
 * `["person or bicycle", "car, bus, plane, motorcycle", "grass, sidewalk, street, or parking lot"]` would only be 3 prompts but represent multiple physical classes as a single class ID 
 
 Once the semantic data is in the costmap layer, the costmap costs used by planning, control, and behavior algorithms will be adjusted based on the cost to traverse a particular terrain class (from none, to some, to illegal). This incentivizes the robot to select terrains to plan through or select trajectories within based on your desired behavioral characteristics. 
-
-Note that once the semantic mask is available, any application can use it as well for things like behavior enhancement, localization pipelines, extracting dynamic obstacles for tracking and so forth. This is a demonstration of one such pipeline using it for terrain-aware navigation. There is only the requirement for the aligned, synchronized pointclouds for the terrain-aware navigation application.
 
 ## SAM3 on Ryzen AI Max+
 
