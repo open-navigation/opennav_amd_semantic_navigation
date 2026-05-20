@@ -69,7 +69,7 @@ For example:
 
 Once the semantic data is in the costmap layer, the costmap costs used by planning, control, and behavior algorithms will be adjusted based on the cost to traverse a particular terrain class (from none, to some, to illegal). This incentivizes the robot to select terrains to plan through or select trajectories within based on your desired behavioral characteristics. 
 
-Note that once the semantic mask is available, any application can use it as well for things like behavior enhancement, localization pipelines, extracting dynamic obstacles for tracking and so forth. This is a demonstration of one such pipeline using it for terrain-aware navigation.
+Note that once the semantic mask is available, any application can use it as well for things like behavior enhancement, localization pipelines, extracting dynamic obstacles for tracking and so forth. This is a demonstration of one such pipeline using it for terrain-aware navigation. There is only the requirement for the aligned, synchronized pointclouds for the terrain-aware navigation application.
 
 ## SAM3 on Ryzen AI Max+
 
