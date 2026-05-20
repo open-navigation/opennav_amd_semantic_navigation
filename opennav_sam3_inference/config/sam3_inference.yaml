@@ -8,5 +8,6 @@ sam3_inference:
     score_threshold: 0.5
     max_objects_per_prompt: 5
     redetect_interval_ms: 0.0
+    reset_tracking_every_seconds: 30.0  # bound GPU memory growth; 0 to disable
     queue_depth: 5
     start_enabled: true
