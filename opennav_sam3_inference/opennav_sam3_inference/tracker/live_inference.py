@@ -375,7 +375,7 @@ class SAM3Live:
         #       the tracker stops propagating them next frame (bounds compute)
         #   (b) are stripped from this frame's raw output so they don't appear
         #       once before disappearing
-        evicted_ids = self._enforce_per_prompt_cap()
+        evicted_ids = self._enforce_per_prompt_cap(raw_out.obj_id_to_tracker_score)
 
         def _strip(d):
             if not evicted_ids or not isinstance(d, dict):
@@ -431,8 +431,19 @@ class SAM3Live:
             return cap.get(prompt_text)
         return None
 
-    def _enforce_per_prompt_cap(self) -> set[int]:
-        """Evict the lowest-scoring excess objects per prompt.
+    def _enforce_per_prompt_cap(self, tracker_scores: dict) -> set[int]:
+        """Evict excess objects per prompt, keeping the most-persistent ones.
+
+        Sort key: live ``tracker_score`` from this frame's raw output.
+        The detection score in ``session.obj_id_to_score`` is frozen at
+        first-detect time and never updates, so when fresh detections
+        arrive each frame at ~0.94 they tie-break-evict the older tracked
+        objects — but those fresh objects haven't built propagation
+        history yet and get filtered out by the postprocess tracker_score
+        gate, producing empty output frames (the "stops detecting"
+        symptom on stuff-class prompts like ``grass`` / ``sidewalk``).
+        Sorting by live tracker_score keeps whichever objects are
+        actually propagating well right now.
 
         Uses ``session.remove_object`` which physically drops the object
         from obj_ids + all per-object dicts, so tracker propagation cost
@@ -448,7 +459,7 @@ class SAM3Live:
             if pid is None:
                 continue
             prompt_text = self.session.prompts.get(pid, "?")
-            score = float(self.session.obj_id_to_score.get(oid, 0.0))
+            score = float(tracker_scores.get(oid, 0.0))
             by_prompt.setdefault(prompt_text, []).append((oid, score))
 
         evicted: set[int] = set()
@@ -456,7 +467,6 @@ class SAM3Live:
             cap = self._cap_for(prompt_text)
             if cap is None or len(items) <= cap:
                 continue
-            # Sort high-score first; keep the top `cap`, evict the rest.
             items.sort(key=lambda x: x[1], reverse=True)
             for oid, _ in items[cap:]:
                 self.session.remove_object(oid, strict=False)
