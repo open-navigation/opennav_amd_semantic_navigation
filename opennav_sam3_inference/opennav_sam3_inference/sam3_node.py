@@ -52,8 +52,8 @@ class Sam3InferenceNode(Node):
         self.declare_parameter('redetect_interval_ms', 0.0)
         # Bound GPU memory growth by periodically dropping the session's
         # accumulated per-frame raw pixel buffer + tracker per-obj history.
-        # Default 3 min; set <= 0 to disable.
-        self.declare_parameter('reset_tracking_every_seconds', 180.0)
+        # Default 30s; set <= 0 to disable.
+        self.declare_parameter('reset_tracking_every_seconds', 30.0)
         self.declare_parameter('queue_depth', 5)
         self.declare_parameter('start_enabled', True)
 
