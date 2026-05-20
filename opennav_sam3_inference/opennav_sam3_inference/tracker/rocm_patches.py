@@ -10,11 +10,7 @@ Fixes:
 """
 from __future__ import annotations
 
-import logging
-
 import torch
-
-logger = logging.getLogger(__name__)
 
 
 # ─── replacement implementations ───────────────────────────────────────────
@@ -75,12 +71,9 @@ def apply() -> None:
     if getattr(mod, "_rocm_patches_applied", False):
         return
 
-    _orig_cc = mod._get_connected_components_with_padding
-
     def _patched_cc(mask):
-        mod._load_cv_utils_kernel_once()
-        if mod.cv_utils_kernel:
-            return _orig_cc(mask)   # kernel available — use original (handles padding)
+        # cv_utils kernel has no ROCm build variant; skip the HF Hub
+        # lookup and always use the scipy fallback on this platform.
         _, _, H, W = mask.shape
         try:
             return _cc_scipy(mask)
@@ -98,16 +91,9 @@ def apply() -> None:
 
         ious = mod.mask_iou(masks_binary, masks_binary)
 
-        mod._load_cv_utils_kernel_once()
-        if mod.cv_utils_kernel:
-            try:
-                kept_inds = mod.cv_utils_kernel.generic_nms(
-                    ious, probs, iou_threshold, use_iou_matrix=True)
-            except Exception as e:
-                logger.warning_once(f"cv_utils NMS failed: {e}. Using PyTorch fallback.")
-                kept_inds = _greedy_nms(ious, probs, iou_threshold)
-        else:
-            kept_inds = _greedy_nms(ious, probs, iou_threshold)
+        # cv_utils kernel has no ROCm build variant; use the pure-PyTorch
+        # greedy NMS directly to avoid the HF Hub lookup at startup.
+        kept_inds = _greedy_nms(ious, probs, iou_threshold)
 
         valid_inds = torch.where(is_valid, is_valid.cumsum(dim=0) - 1,
                                  torch.tensor(-1, device=is_valid.device))

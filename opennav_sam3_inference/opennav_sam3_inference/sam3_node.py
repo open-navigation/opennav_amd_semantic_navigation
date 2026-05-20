@@ -50,6 +50,10 @@ class Sam3InferenceNode(Node):
         self.declare_parameter('score_threshold', 0.5)
         self.declare_parameter('max_objects_per_prompt', 5)
         self.declare_parameter('redetect_interval_ms', 0.0)
+        # Bound GPU memory growth by periodically dropping the session's
+        # accumulated per-frame raw pixel buffer + tracker per-obj history.
+        # Default 30s; set <= 0 to disable.
+        self.declare_parameter('reset_tracking_every_seconds', 30.0)
         self.declare_parameter('queue_depth', 5)
         self.declare_parameter('start_enabled', True)
 
@@ -63,6 +67,8 @@ class Sam3InferenceNode(Node):
         self._score_threshold = self.get_parameter('score_threshold').value
         max_objects = self.get_parameter('max_objects_per_prompt').value
         self._redetect_interval_ms = self.get_parameter('redetect_interval_ms').value
+        self._reset_tracking_every_s = self.get_parameter(
+            'reset_tracking_every_seconds').value
         queue_depth = self.get_parameter('queue_depth').value
         self._enabled = self.get_parameter('start_enabled').value
 
@@ -90,6 +96,7 @@ class Sam3InferenceNode(Node):
 
         # ROS time-based redetection tracking
         self._last_detect_time = self.get_clock().now()
+        self._last_reset_time = self.get_clock().now()
 
         self._bridge = CvBridge()
 
@@ -266,6 +273,27 @@ class Sam3InferenceNode(Node):
                 out_msg = self._bridge.cv2_to_imgmsg(overlay, encoding='rgb8')
                 out_msg.header = msg.header
                 self._pub.publish(out_msg)
+
+            # Periodic reset_tracking() to bound the session's per-frame
+            # raw pixel buffer + tracker per-obj history (which otherwise
+            # grows ~1.5 MB/frame at imgsz=504, exhausting GPU after
+            # ~20 min at 30 fps). Runs inside the image callback AFTER
+            # publish so it serializes with inference (no race) and the
+            # current frame's mask is already delivered to downstream
+            # consumers (label_mask publishes class_id per pixel, so
+            # obj_id renumbering is invisible). Next inference is slightly
+            # faster than steady-state (empty session, no propagation
+            # overhead) before ramping back over a few frames.
+            if self._reset_tracking_every_s > 0.0:
+                now = self.get_clock().now()
+                elapsed_s = (now - self._last_reset_time).nanoseconds / 1e9
+                if elapsed_s >= self._reset_tracking_every_s:
+                    self._live.reset_tracking()
+                    self._last_reset_time = now
+                    self.get_logger().debug(
+                        f'reset_tracking() to bound GPU memory '
+                        f'(elapsed {elapsed_s:.0f}s since last reset)'
+                    )
         except Exception as exc:
             self.get_logger().error(f'Segmentation failed: {exc}')
 
