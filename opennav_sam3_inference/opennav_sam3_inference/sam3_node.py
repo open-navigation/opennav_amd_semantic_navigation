@@ -290,7 +290,7 @@ class Sam3InferenceNode(Node):
                 if elapsed_s >= self._reset_tracking_every_s:
                     self._live.reset_tracking()
                     self._last_reset_time = now
-                    self.get_logger().info(
+                    self.get_logger().debug(
                         f'reset_tracking() to bound GPU memory '
                         f'(elapsed {elapsed_s:.0f}s since last reset)'
                     )
