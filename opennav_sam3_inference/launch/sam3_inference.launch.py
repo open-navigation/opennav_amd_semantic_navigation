@@ -3,8 +3,10 @@
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.actions import SetEnvironmentVariable
@@ -78,4 +80,10 @@ def generate_launch_description():
                 '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0'},
             arguments=['--ros-args', '--log-level', log_level],
         ),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([
+                PathJoinSubstitution([
+                    pkg_share, 'launch', 'include', 'sensor_processing_pipeline.launch.py'])]),
+            condition=IfCondition(PythonExpression(["'", sensor_processing_pipeline, "' == 'true'"])),
+        )
     ])
