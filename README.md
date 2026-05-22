@@ -24,11 +24,11 @@ SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text p
 
 TODO: Fill the table
 
-| Prompts | New detect every frame | New Detect every 1s, track between |
+| Prompts | New detect every frame (ms) | New Detect every 1s, track between |
 | ------- | ------------------ | --------------------- |
-| 1       |                    |                       |
-| 2       |                    |                       |
-| 4       |                    |                       |
+| 1       |  154.6 (6.46 Hz)   |  103.8 (9.63 Hz)      |
+| 2       |  183.3 (5.45 Hz)   |  136.0 (7.35 Hz)      |
+| 4       |  305.6 (3.27 Hz)   |  211.3 (4.73 Hz)      |
 
 ## Package Structure
 
