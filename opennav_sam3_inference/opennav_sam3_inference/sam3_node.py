@@ -7,6 +7,7 @@ os.environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("HSA_XNACK", "1")
 
 import re
+import threading
 
 import cv2
 import numpy as np
@@ -15,6 +16,8 @@ import torch
 from cv_bridge import CvBridge
 from opennav_sam3_msgs.srv import ChangePrompt
 from rcl_interfaces.msg import SetParametersResult
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
@@ -99,6 +102,7 @@ class Sam3InferenceNode(Node):
         self._last_reset_time = self.get_clock().now()
 
         self._bridge = CvBridge()
+        self._infer_lock = threading.Lock()
 
         self._pub = self.create_publisher(Image, '~/segmentation_mask', queue_depth)
         self._label_mask_pub = self.create_publisher(Image, '~/label_mask', queue_depth)
@@ -109,7 +113,10 @@ class Sam3InferenceNode(Node):
         )
         self._label_info_pub = self.create_publisher(LabelInfo, '~/label_info', label_info_qos)
         sub_qos = QoSProfile(depth=queue_depth, reliability=ReliabilityPolicy.BEST_EFFORT)
-        self._sub = self.create_subscription(Image, '~/image', self._on_image, sub_qos)
+        self._image_cb_group = ReentrantCallbackGroup()
+        self._sub = self.create_subscription(
+            Image, '~/image', self._on_image, sub_qos,
+            callback_group=self._image_cb_group)
         self._change_prompt_srv = self.create_service(
             ChangePrompt, '~/change_prompt', self._on_change_prompt
         )
@@ -232,6 +239,11 @@ class Sam3InferenceNode(Node):
         )
         if not self._enabled:
             return
+
+        # Non-blocking try; if inference is in flight, drop this frame
+        if not self._infer_lock.acquire(blocking=False):
+            return
+
         try:
             bgr = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
@@ -296,6 +308,8 @@ class Sam3InferenceNode(Node):
                     )
         except Exception as exc:
             self.get_logger().error(f'Segmentation failed: {exc}')
+        finally:
+            self._infer_lock.release()
 
         self.get_logger().info(  # TODO back to debug
             f'Finished processing image with timestamp {msg.header.stamp.sec}.'
@@ -323,8 +337,10 @@ def _render_overlay(rgb: np.ndarray, instances, alpha: float = 0.5) -> np.ndarra
 def main(args=None):
     rclpy.init(args=args)
     node = Sam3InferenceNode()
+    executor = MultiThreadedExecutor(num_threads=3)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
