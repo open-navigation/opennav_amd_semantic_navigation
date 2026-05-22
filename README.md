@@ -191,6 +191,7 @@ Now you can source the workspace as usual and launch the inference node, even ou
 ros2 launch opennav_sam3_inference sam3_inference.launch.py image_topic:=/my_camera/image_raw
 ```
 
+Note: You may need to be in Performance mode for this to work properly.
 
 ## Related Projects
 
