@@ -17,8 +17,7 @@ def generate_launch_description():
 
     params_file = LaunchConfiguration('params_file')
     image_topic = LaunchConfiguration('image_topic')
-    segmentation_topic = LaunchConfiguration('segmentation_topic')
-    label_mask_topic = LaunchConfiguration('label_mask_topic')
+    sensor_processing_pipeline = LaunchConfiguration('sensor_processing_pipeline')
     namespace = LaunchConfiguration('namespace')
     log_level = LaunchConfiguration('log_level')
 
@@ -38,7 +37,6 @@ def generate_launch_description():
                 EnvironmentVariable('PYTHONPATH', default_value=''),
             ],
         ),
-
         DeclareLaunchArgument(
             'params_file',
             default_value=default_params,
@@ -50,14 +48,9 @@ def generate_launch_description():
             description='Input image topic to remap onto ~/image.',
         ),
         DeclareLaunchArgument(
-            'segmentation_topic',
-            default_value='/sam3/segmentation_mask',
-            description='Output segmentation mask topic to remap onto ~/segmentation_mask.',
-        ),
-        DeclareLaunchArgument(
-            'label_mask_topic',
-            default_value='/sam3/label_mask',
-            description='Output label mask topic to remap onto ~/label_mask.',
+            'sensor_processing_pipeline',
+            default_value='false',
+            description='Whether to process sensor data for use with costmap layer.',
         ),
         DeclareLaunchArgument(
             'namespace',
@@ -79,8 +72,6 @@ def generate_launch_description():
             parameters=[params_file],
             remappings=[
                 ('~/image', image_topic),
-                ('~/segmentation_mask', segmentation_topic),
-                ('~/label_mask', label_mask_topic),
             ],
             additional_env={
                 'LD_PRELOAD': '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
