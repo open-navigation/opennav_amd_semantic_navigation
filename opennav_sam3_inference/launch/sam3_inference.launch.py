@@ -46,12 +46,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'image_topic',
-            default_value='/camera/color/image_raw',
+            default_value='/sensors/camera_0/color/image',
             description='Input image topic to remap onto ~/image.',
         ),
         DeclareLaunchArgument(
             'sensor_processing_pipeline',
-            default_value='false',
+            default_value='true',
             description='Whether to process sensor data for use with costmap layer.',
         ),
         DeclareLaunchArgument(
