@@ -71,6 +71,13 @@ def generate_launch_description():
                     }],
                 ),
 
+                # If your camera provides a registered pointcloud which can be decimated
+                # to a useful size for the semantic segmentation costmap layer (i.e. 320x180, 424x240, etc)
+                # then the following 2 components and depth_image_resize may be removed.
+                # The remaining nodes are to reduce the labeled mask size to align with the pointcloud
+                # representing a useful resolution to process on an occupancy grid.
+                # For an Orbecc camera, you can do this with enabling pointcloud, ordered pointcloud, depth registration
+                # enabling decimation filter, and finally setting the pointcloud decimation filter factor to 4 (for 320x180)
                 ComposableNode(
                     package='depth_image_proc',
                     plugin='depth_image_proc::RegisterNode',
