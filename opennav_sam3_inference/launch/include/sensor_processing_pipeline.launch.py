@@ -93,7 +93,7 @@ def generate_launch_description():
                     remappings=[
                         ('image_rect',  '/sensors/camera_0/depth_registered/image'),
                         ('camera_info', '/sensors/camera_0/depth_registered/camera_info'),
-                        ('points',      '/sensors/camera_0/points'),
+                        ('points',      '/sensors/camera_0/points_registered'),
                     ],
                 ),
 
