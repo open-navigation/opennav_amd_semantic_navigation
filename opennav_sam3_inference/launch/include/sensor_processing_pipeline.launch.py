@@ -60,7 +60,7 @@ def generate_launch_description():
                     remappings=[
                         ('/image/image_raw',    '/sam3_inference/label_mask'),
                         ('/sam3_inference/camera_info',    '/sensors/camera_0/color/camera_info'),
-                        ('/resize/image_raw',   '/sam3_inference_post/label_mask_resized'),
+                        ('/resize/image_raw',   '/sam3_inference/resized/label_mask'),
                     ],
                     parameters=[{
                         'use_scale':     False,
