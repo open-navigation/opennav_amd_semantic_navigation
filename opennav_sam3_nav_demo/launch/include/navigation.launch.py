@@ -34,14 +34,15 @@ def generate_launch_description():
     container_name = LaunchConfiguration('container_name')
     nav2pose_bt_xml = LaunchConfiguration('nav2pose_bt_xml')
 
-    general_lifecycle_nodes = ['controller_server',
-                               'smoother_server',
-                               'velocity_smoother']
-    
-    composite_lifecycle_nodes = ['planner_server',
-                                 'behavior_server',
-                                 'bt_navigator',
-                                 'waypoint_follower']
+    lifecycle_nodes = [
+        'controller_server',
+        'smoother_server',
+        'planner_server',
+        'behavior_server',
+        'bt_navigator',
+        'waypoint_follower',
+        'velocity_smoother',
+        'collision_monitor']
 
     param_substitutions = {
         'use_sim_time': use_sim_time,
@@ -91,31 +92,6 @@ def generate_launch_description():
                 name='smoother_server',
                 parameters=[configured_params]),
             ComposableNode(
-                package='nav2_lifecycle_manager',
-                plugin='nav2_lifecycle_manager::LifecycleManager',
-                name='lifecycle_manager_general_navigation',
-                parameters=[{'use_sim_time': use_sim_time,
-                             'autostart': True,
-                             'node_names': general_lifecycle_nodes}]),
-            ComposableNode(
-                package='nav2_velocity_smoother',
-                plugin='nav2_velocity_smoother::VelocitySmoother',
-                name='velocity_smoother',
-                parameters=[configured_params],
-                remappings=[('cmd_vel', 'cmd_vel_nav')]),
-            ComposableNode(
-                package='nav2_collision_monitor',
-                plugin='nav2_collision_monitor::CollisionMonitor',
-                name='collision_monitor',
-                parameters=[configured_params]),
-            ComposableNode(
-                package='nav2_lifecycle_manager',
-                plugin='nav2_lifecycle_manager::LifecycleManager',
-                name='lifecycle_manager_application_navigation',
-                parameters=[{'use_sim_time': use_sim_time,
-                             'autostart': True,
-                             'node_names': ['collision_monitor']}]),
-            ComposableNode(
                 package='nav2_planner',
                 plugin='nav2_planner::PlannerServer',
                 name='planner_server',
@@ -136,12 +112,23 @@ def generate_launch_description():
                 name='waypoint_follower',
                 parameters=[configured_params]),
             ComposableNode(
+                package='nav2_velocity_smoother',
+                plugin='nav2_velocity_smoother::VelocitySmoother',
+                name='velocity_smoother',
+                parameters=[configured_params],
+                remappings=[('cmd_vel', 'cmd_vel_nav')]),
+            ComposableNode(
+                package='nav2_collision_monitor',
+                plugin='nav2_collision_monitor::CollisionMonitor',
+                name='collision_monitor',
+                parameters=[configured_params]),
+            ComposableNode(
                 package='nav2_lifecycle_manager',
                 plugin='nav2_lifecycle_manager::LifecycleManager',
-                name='lifecycle_manager_composite_navigation',
+                name='lifecycle_manager_navigation',
                 parameters=[{'use_sim_time': use_sim_time,
                              'autostart': True,
-                             'node_names': composite_lifecycle_nodes}]),
+                             'node_names': lifecycle_nodes}]),
         ],
     )
 
