@@ -83,7 +83,9 @@ def generate_launch_description():
             parameters=[configured_params, {'autostart': True}],
             arguments=['--ros-args', '--log-level', 'info'],
             output='screen'),
-        
+    
+    # Local odometry-only navigation for demonstration purposes in a variety of environments
+    # without needing to setup tenuous localization solutions outdoors, open fields, indoors, etc.
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
