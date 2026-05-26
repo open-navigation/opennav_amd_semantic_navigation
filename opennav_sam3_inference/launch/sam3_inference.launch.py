@@ -84,6 +84,6 @@ def generate_launch_description():
             PythonLaunchDescriptionSource([
                 PathJoinSubstitution([
                     pkg_share, 'launch', 'include', 'sensor_processing_pipeline.launch.py'])]),
-            condition=IfCondition(PythonExpression(["'", sensor_processing_pipeline, "' == 'true'"])),
+            condition=IfCondition(sensor_processing_pipeline),
         )
     ])
