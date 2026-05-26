@@ -85,7 +85,9 @@ Trails? Glen canyon/pt reyes/stern grove
 
 We all know in our various environments (warehouses, homes, construction, agriculture, etc) there are constantly small and nuanced things on the ground we need to contend with. Now with this integration you can detect and avoid them without any fine-tuning!
 
-![Data Demo](docs/examples.gif)
+<p align="center">
+  <img src="docs/examples.gif" alt="Data Demo" />
+</p>
 
 There are many uses of semantic data from SAM3. Applications can use it for things like behavior enhancement based on situational awareness, localization pipeline improvement, extracting dynamic obstacles for tracking, and so forth. This demonstration of one such pipeline using it for terrain-aware navigation.
 
