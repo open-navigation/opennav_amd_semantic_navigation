@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(opennav_sam3_navigation)
+project(opennav_sam3_nav_demo)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
