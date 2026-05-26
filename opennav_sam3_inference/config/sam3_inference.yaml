@@ -3,8 +3,8 @@ sam3_inference:
     checkpoint: /home/administrator/opennav-sam3-inference-models/sam3  # Absolute path to the SAM3 checkpoint
     onnx_dir: /home/administrator/opennav-sam3-inference-models/onnx_files_504  # Absolute path to the directory containing ONNX files
     
-    # prompts: ["sidewalk", "grass", "street", "car"]
-    # class_ids: [1, 2, 3, 4]
+    # prompts: ["sidewalk", "grass"]
+    # class_ids: [1, 2]
     
     prompts: ["floor", "wall"]
     class_ids: [1, 2]
