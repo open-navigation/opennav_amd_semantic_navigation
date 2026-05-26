@@ -18,6 +18,7 @@ def generate_launch_description():
     default_params = PathJoinSubstitution([pkg_share, 'config', 'sam3_inference.yaml'])
 
     params_file = LaunchConfiguration('params_file')
+    use_sim_time = LaunchConfiguration('use_sim_time')
     image_topic = LaunchConfiguration('image_topic')
     sensor_processing_pipeline = LaunchConfiguration('sensor_processing_pipeline')
     namespace = LaunchConfiguration('namespace')
@@ -43,6 +44,11 @@ def generate_launch_description():
             'params_file',
             default_value=default_params,
             description='Path to the SAM3 inference parameters YAML.',
+        ),
+        DeclareLaunchArgument(
+            'use_sim_time',
+            default_value='false',
+            description='Whether to use simulation time.',
         ),
         DeclareLaunchArgument(
             'image_topic',
@@ -71,10 +77,10 @@ def generate_launch_description():
             namespace=namespace,
             output='screen',
             emulate_tty=True,
-            parameters=[params_file],
+            parameters=[params_file, {'use_sim_time', use_sim_time}],
             remappings=[
                 ('~/image', image_topic),
-            ],
+            ],  
             additional_env={
                 'LD_PRELOAD': '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
                 '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0'},

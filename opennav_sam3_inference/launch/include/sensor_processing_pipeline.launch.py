@@ -1,17 +1,26 @@
 from launch import LaunchDescription
-from launch.actions import GroupAction
+from launch.actions import DeclareLaunchArgument, GroupAction
 
 from launch_ros.actions import LoadComposableNodes, Node
 from launch_ros.descriptions import ComposableNode
+from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
+
+    use_sim_time = LaunchConfiguration('use_sim_time')
+
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='false',
+        description='Whether to use simulation time.',
+    )
 
     depth_pointcloud_proc = GroupAction([
         Node(
             name='depth_pointcloud_proc_container',
             package='rclcpp_components',
             executable='component_container_isolated',
-            parameters=[],
+            parameters=[{'use_sim_time': use_sim_time}],
             arguments=['--ros-args', '--log-level', 'info'],
             output='screen'),
         
@@ -33,6 +42,7 @@ def generate_launch_description():
                         'height':        240,
                         'interpolation': 0,
                         'always_subscribe': True,
+                        'use_sim_time': use_sim_time,
                     }],
                 ),
 
@@ -50,6 +60,7 @@ def generate_launch_description():
                         'height':        240,
                         'interpolation': 0,
                         'always_subscribe': True,
+                        'use_sim_time': use_sim_time,
                     }],
                 ),
 
@@ -68,6 +79,7 @@ def generate_launch_description():
                         'height':        240,
                         'interpolation': 0,  # NEAREST — required for label masks
                         'always_subscribe': True,
+                        'use_sim_time': use_sim_time,
                     }],
                 ),
 
@@ -90,6 +102,9 @@ def generate_launch_description():
                         ('depth_registered/image_rect',  '/sensors/camera_0/depth_registered/image'),
                         ('depth_registered/camera_info', '/sensors/camera_0/depth_registered/camera_info'),
                     ],
+                    parameters=[{
+                        'use_sim_time': use_sim_time,
+                    }],
                 ),
 
                 ComposableNode(
@@ -102,10 +117,13 @@ def generate_launch_description():
                         ('camera_info', '/sensors/camera_0/depth_registered/camera_info'),
                         ('points',      '/sensors/camera_0/points_registered'),
                     ],
+                    parameters=[{
+                        'use_sim_time': use_sim_time,
+                    }],
                 ),
 
             ],
         ),
     ])
 
-    return LaunchDescription([depth_pointcloud_proc])
+    return LaunchDescription([use_sim_time_arg, depth_pointcloud_proc])
