@@ -62,12 +62,17 @@ TODO video -- left/right lane alameda on well marked road (try it) DRONEABLE
 
 ### Indoor Terrain
 
-Prompts: `"wall or large static objects like furniture, columns, carts, boxes, or trash cans", "floor", "person, dog, or cat"`, whereas wthe first is lethal, floor is non-zero low cost, and person is high non-lethal cost
+Prompts: `"wall or large static objects like furniture, columns, carts, boxes, or trash cans", "floor", "person, dog, or cat"`, whereas the first is lethal, floor is non-zero low cost, and person is high non-lethal cost
 
-TODO video my officespace -- MY OFFICE
-TODO video hallway -- MY OFFICE
-TODO video officespace -- POLYMATH
+TODO video hallway -- MY OFFICE (video / camera feed)
+TODO video officespace -- POLYMATH (video / camera feed)
 
+
+Prompts: `"wall", "floor"`, whereas the walls are lethal, floor is non-zero low cost to show its contribution clearly
+
+Note that this size of space reveals something interesting which others don't given the narrow FOV of the single sensor feed: a technique like this can be used to effectively annotate a space during mapping to have global semantic data!
+
+DONE: TODO video my officespace built in rviz only (no camera for privacy) -- MY OFFICE 
 
 ### TODO -- DRONABLE/heroable
 
