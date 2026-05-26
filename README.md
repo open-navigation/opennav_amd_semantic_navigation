@@ -1,6 +1,6 @@
-# Semantic SAM3 Navigation on AMD Ryzen AI Max+
+# Semantic SAM3 Navigation on AMD X100 Strix Halo
 
-This repository hosts a demonstration of using generalized and edge compute segmentation for autonomous navigation with [Nav2](https://docs.nav2.org/), running on the [AMD Ryzen AI Max+](https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html) and Meta's [SAM3](https://ai.meta.com/sam3) foundation model for text-prompted semantic segmentation. It turns a camera stream into a live, locally-run named segmentation of the robot's environment that Nav2 can reason about for **terrain-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, **changing situational context**, and handling of **dynamic obstacles**, and much more.
+This repository hosts a demonstration of using generalized semantic segmentation for autonomous navigation with [Nav2](https://docs.nav2.org/), running on the edge on a [AMD X100 Strix Halo](https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html) using Meta's [SAM3](https://ai.meta.com/sam3) foundation model for text-prompted semantic segmentation. It turns a camera stream into a live, locally-run text/image-based segmentation of the robot's environment that Nav2 can reason about for **terrain-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, **changing situational context**, and handling of **dynamic obstacles**, and much more.
 
 This enables applications to:
 
@@ -14,11 +14,14 @@ This enables applications to:
 
   * The list goes on! If you can imagine it, it can be integrated into a behavior tree, navigation algorithm, or costmap layer. Doubly so for application-specific tasks.
 
-This demonstrates state-of-the-art foundation model workflows using AMD's Ryzen AI Max+ "Strix Halo" or X100 - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with 32 powerful x86 CPU cores to boot. The newest generations of AI-enabled processors are absolutely amazing for robotics (NPU, GPU, FPGA, 32x x86 cores) workloads without needing to purchase a robotics-specific SOM.
+This demonstrates state-of-the-art foundation model workflows using AMD's "Strix Halo" or X100 - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with 32 powerful x86 CPU cores to boot. The newest generations of AI-enabled processors are absolutely amazing for robotics (NPU, GPU, FPGA, 32x x86 cores) workloads.
+
+TODO video of the navigation + mask (concise) / drone??? Main hero video
+TODO Video matrix + glamor shot:
+  * SAM3 in the environment mask
+  * Robot navigating terrains and avoiding small or dfficult obstacles using this
 
 **⚠️ Need ROS 2, Nav2, or deployment help? Contact [Open Navigation](https://www.opennav.org/)! ⚠️**
-
-TODO video of the navigation + mask (concise) / drone???
 
 SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text prompts regarding what to segment from the image ("person", "pallet", "wet floor sign", "curb", "mud", "ceiling", ...) and it returns masks for each class and ID of each object within a class. Gone are the days of fixed detectors or segmentation algorithm classes: the same model can be used at run-time to find various environments, objects, surfaces, and more without retraining (and may be dynamically changed at run-time too!). Combining this with Nav2's costmap, behavior tree, and/or algorithm plugins, SAM3 is extremely powerful and empowers intelligent applications to be developed understanding the world more fully. This enables the robot to make decisions about navigation or behaviors driven not by obstacles but by rich semantic context.
 
@@ -28,21 +31,11 @@ SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text p
 | 2       |  183.3 (5.45 Hz)   |  136.0 (7.35 Hz)      |
 | 4       |  305.6 (3.27 Hz)   |  211.3 (4.73 Hz)      |
 
-The choice of redetecting each frame or not can depend on the FOV of the sensor and how dynamic your environment is. **5-10 Hz for a server class semantic segmentation algorithm is very impressive on the Ryzen AI Max+ 395!** 
-
-## Package Structure
-
-This repository is layed out as the following:
-
-*  `opennav_sam3_inference`: the ROS 2 node optimized for Strix Halo that hosts SAM3, subscribes to a camera topic, and publishes segmentation masks as an overlay image and labeled masks for use in downstream applications.
-*   `opennav_sam3_msgs`: message and service definitions (e.g. `ChangePrompt.srv`) used to reconfigure the segmentation node at runtime.
-* `semantic_segmentation_layer`: A symlink to the semantic segmentation layer used to project the 2D segmentation mask into the costmap frame and set relative environment costs for terrain-aware navigation and detecting small or otherwise hard-to-see obstacles
-
-The demonstration software used is in the main [Honeybee repository](https://github.com/open-navigation/opennav_amd_demonstrations), so this repository only contains the general software useful for integrating SAM3 into an arbitrary robot application. See that project for Nav2 configurations, the demonstration autonomy applications, and related.
+The choice of redetecting each frame or not can depend on the FOV of the sensor and how dynamic your environment is. **5-10 Hz for a server class semantic segmentation algorithm is very impressive on the X100 Strix Halo!** 
 
 ## Real-World Tech Demonstrations
 
-This demonstration shows **terrain-aware navigation** using SAM3's semantic segmentation to give the robot a rich understanding of the surfaces and objects around it. This provides context and intelligence far beyond what a depth camera or lidar alone can provide.
+These demonstrations shows **terrain-aware navigation** using SAM3's semantic segmentation to give the robot a rich understanding of the surfaces and objects around it. This provides context and intelligence far beyond what a depth camera or lidar alone can provide.
 
 Traditional depth-only perception tells you where obstacles are, but not what they are or how you should treat it. It also struggles with small or thin obstacles (cables, low curbs, debris) and distant objects beyond its effective range. Semantic segmentation fills this gap by labeling every pixel with what it actually is, even in situations where depth is out of range.
 
@@ -52,57 +45,72 @@ With terrain labels in the costmap, the robot can:
 * **Detect small or hard-to-see obstacles**: thin poles, low-profile objects on the ground, puddles, holes, or items at distances beyond typical stereo/ToF range in a generalized way without training a detector or segmentation model for each one.
 * **Distinguish objects apart**: detect particular objects and treat them differently in a perception pipeline (also localization or behavioral pipeline)
 
-This demonstration is performed in a few unique cases to showcase the value of terrain segmentation. In each, we configure the SAM3 inference node & semantic segmentation layer with slightly different prompts and costs. We can do so without any fine-tuning or retraining to segment out the surfaces or objects of interest in each. 
-
-1. TODO NAME (S curve Precita sidewalk/grass [odometric navigation] OR following the sidewalk, keep sending a goal ahead by 10m on sidewalk pixel -- useable below. Panhandle path?) NO DRONE
-
-TODO short description
-
-TODO what we segment, relative costs
-
-2. TODO NAME (alameda bike lane or driveway vs street / curb OR humble sea sidewalk/sand shimmy OR 4-square plaza). DRONE + dataset masks. 
-
-TODO short description
-
-TODO what we segment, relative costs
-
-3. TODO NAME (winery vineyard? hiking trail? )
-
-TODO short description
-
-TODO what we segment, relative costs
-
-4. Datasets segmenting for inspiration TODO
-  * TODO Polymath Office: chairs, desks, people, dogs, etc
-  * TODO
-  * TODO
+These demonstrations are performed in a few unique cases to showcase the value of terrain segmentation. In each, we configure the SAM3 inference node & semantic segmentation layer with slightly different prompts and costs. We can do so without any fine-tuning or retraining to segment out the surfaces or objects of interest in each. We also perform navigation without the use of depth-based costmap layers (semantic segmentation only!), but that should be seriously considered as a backup for deployed applications.
 
 
-TODO Video matrix + glamor shot:
-  * SAM3 in the environment mask
-  * Robot navigating terrains and avoiding small or dfficult obstacles using this
+### Outdoor Terrain
+
+Prompts: `"sidewalk", "grass, trees, or benches"`, whereas the latter is made an illegal cost:
+
+TODO video -- precita park
+TODO video -- Main Street Linear Park Alameda // A-7 Corsair II Static Aircraft Display DRONEABLE
+
+Prompts: `"bike lane", "curb, street, plants, or grass"`, whereas the latter prompt is made illegal cost to stay in the bike lane:
+
+TODO video -- bike lane 1x alameda almanc down to humble sea DRONEABLE
+TODO video -- left/right lane alameda on well marked road (try it) DRONEABLE
+
+### Indoor Terrain
+
+Prompts: `"wall or large static objects like furniture, columns, carts, boxes, or trash cans", "floor", "person, dog, or cat"`, whereas wthe first is lethal, floor is non-zero low cost, and person is high non-lethal cost
+
+TODO video my officespace -- MY OFFICE
+TODO video hallway -- MY OFFICE
+TODO video officespace -- POLYMATH
 
 
+### TODO -- DRONABLE/heroable
 
-Note that there are many uses of semantic data from SAM3. Applications can use it for things like behavior enhancement based on situational awareness, localization pipeline improvement, extracting dynamic obstacles for tracking, and so forth. This demonstration of one such pipeline using it for terrain-aware navigation.
+Trails? Glen canyon/pt reyes/stern grove
+4-square plaza (dronable?) WHILE IN ALAMEDA
+
+
+### Bonus: Some Motivating Ideas!
+
+We all know in our various environments (warehouses, homes, construction, agriculture, etc) there are constantly small and nuanced things on the ground we need to contend with. Now with this integration you can detect and avoid them without any fine-tuning!
+
+TODO Gif of 10x: pothole, forks, cable, cable2, puddle, overhang sign, lego, glass wall, tall grass, tools on ground
+
+There are many uses of semantic data from SAM3. Applications can use it for things like behavior enhancement based on situational awareness, localization pipeline improvement, extracting dynamic obstacles for tracking, and so forth. This demonstration of one such pipeline using it for terrain-aware navigation.
+
+## Package Structure
+
+This repository is layed out as the following:
+
+*  `opennav_sam3_inference`: the ROS 2 node optimized for Strix Halo that hosts SAM3, subscribes to a camera topic, and publishes segmentation masks as an overlay image and labeled masks for use in downstream applications.
+*   `opennav_sam3_msgs`: message and service definitions (e.g. `ChangePrompt.srv`) used to reconfigure the segmentation node at runtime.
+* `semantic_segmentation_layer`: A symlink to the semantic segmentation layer used to project the 2D segmentation mask into the costmap frame and set relative environment costs for terrain-aware navigation and detecting small or otherwise hard-to-see obstacles
+* `opennav_sam3_nav_demo`: A demonstration of Nav2 configuration used to navigate with local semantic data
+
+The demonstration software used is in the main [Honeybee repository](https://github.com/open-navigation/opennav_amd_demonstrations), so this repository only contains the general software useful for integrating SAM3 into an arbitrary robot application. See that project for Nav2 configurations, the demonstration autonomy applications, and related.
 
 ## Integration Architecture
 
-The pipeline follows a straightforward data flow from camera to costmap, as shown below:
+The pipeline follows a straightforward data flow from camera to costmap, as shown below using an Orbbec Gemini 355 RGBD camera:
 
 ![Architecture Diagram](docs/diagram.png)
 
-The only requirement is that the camera images are undistorted and aligned / synchronized with the pointcloud, thus a standard depth camera is recommended. This uses an Orbecc camera with camera undistortion enabled. The resolutions should also match before passing into the costmap layer, however a high quality camera image with lower-resolution depth can work if using the SAM3 node's decimate on the `~/label_mask` image to the pointcloud's size.
+The only requirement is that the camera images are undistorted and the pointcloud is aligned / synchronized with the color image, thus a standard depth camera is recommended. The resolutions should also match before passing into the costmap layer. However a high quality color image for segmentation can work with lower-resolution depth as long as SAM3's outputs are decimate to the pointcloud's size. See `sensor_processing_pipeline.launch.py` for an example of the pointcloud rectification and `~/label_mask` resizing.
 
 The SAM3 node will output a label mask and semantic overlay (for debugging) containing the detected text prompts. The node can process multiple different text prompts to detect many different classes, however the performance will drop proportionate to the number of text prompts. Conveniently, prompts can be arbitrarily long, so a single one may represent multiple different classes as long as you want to treat them the same.
 
 For example:
 * `["grass", "sidewalk", "car", "street", "bicycle"]` is 5 prompts that will each be assigned specific classes
-* `["person or bicycle", "car, bus, plane, motorcycle", "grass, sidewalk, street, or parking lot"]` would only be 3 prompts but represent multiple physical classes as a single class ID 
+* `["person, child, dog, or bicycle", "car, bus, plane, motorcycle", "grass, sidewalk, street, or parking lot"]` would only be 3 prompts but represent multiple physical classes as a single class ID 
 
 Once the semantic data is in the costmap layer, the costmap costs used by planning, control, and behavior algorithms will be adjusted based on the cost to traverse a particular terrain class (from none, to some, to illegal). This incentivizes the robot to select terrains to plan through or select trajectories within based on your desired behavioral characteristics. 
 
-## SAM3 on Ryzen AI Max+
+## SAM3 on AMD X100 Strix Halo
 
 The SAM3 semantic segmentation node publishes three outputs:
 
@@ -180,7 +188,7 @@ Configure the node parameters in `sam3_inference.yaml` to ensure absolute paths 
 Build this package in the conda environment used for the setup script to use the correct environment.
 
 ```bash
-conda activate sam3-tracker # Or the a different environment name used in setup.sh script
+conda activate opennav-sam3-inference
 colcon build --packages-select opennav_sam3_inference
 conda deactivate
 ```
@@ -191,10 +199,10 @@ Now you can source the workspace as usual and launch the inference node, even ou
 ros2 launch opennav_sam3_inference sam3_inference.launch.py image_topic:=/my_camera/image_raw
 ```
 
-Note: You may need to be in Performance mode for this to work properly.
+TODO demo gif
 
 ## Related Projects
 
-*   [opennav_amd_demonstrations](https://github.com/open-navigation/opennav_amd_demonstrations): companion project demonstrating indoor 2D, urban 3D, outdoor GPS-based navigation, and now semantic segmentation navigation on Ryzen AI / AI Max+ computers with the Honeybee reference platform.
+*   [opennav_amd_demonstrations](https://github.com/open-navigation/opennav_amd_demonstrations): companion project demonstrating indoor 2D, urban 3D, outdoor GPS-based navigation, and now semantic segmentation navigation on Ryzen AI / X100 computers with the Honeybee reference platform.
 *   [Nav2](https://github.com/ros-navigation/navigation2): the ROS 2 navigation stack this work plugs into.
 *   [Ryzers](https://github.com/AMDResearch/Ryzers): Pre-configured and optimized docker images for AI on AMD GPUs
