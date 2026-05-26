@@ -19,7 +19,7 @@ import torch
 # Filename -> list of text prompts to segment with.
 IMAGE_PROMPTS = {
     "cables.jpeg":                 ["Cables and chargers along the floor"], # TODO try small objects on the ground
-    "cables2.jpeg":                ["cables on the floor"], # TODO try small objects on the ground
+    "cables2.jpg":                 ["cables on the floor"], # TODO try small objects on the ground
     "forklift_ground_forks.jpg":   ["forklift forks", "ground or floor"],
     "glass_wall.jpg":              ["glass wall or door", "carpet", "wood, concrete, or tile floor"],
     "lego.jpg":                    ["lego or legos", "carpet"], # TODO try small objects on the ground
@@ -27,7 +27,7 @@ IMAGE_PROMPTS = {
     "pothole.jpg":                 ["pothole", "road"],
     "puddle.png":                  ["puddle or water", "road"],
     "tall_grass_push_through.jpg": ["tall grass a robot can drive over"],
-    "tools_on_ground.jpeg":        ["tools on the ground", "floor"],
+    "shovel.jpg":                  ["tools on the ground", "hole", "pile of dirt", "navigable flat ground"], #TODO last one
 }
 
 

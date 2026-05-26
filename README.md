@@ -64,7 +64,7 @@ TODO video -- left/right lane alameda on well marked road (try it) DRONEABLE
 
 Prompts: `"wall or large static objects like furniture, columns, carts, boxes, or trash cans", "floor", "person, dog, or cat"`, whereas the first is lethal, floor is non-zero low cost, and person is high non-lethal cost
 
-TODO video hallway -- MY OFFICE (video / camera feed)
+DONE: TODO video hallway -- MY OFFICE (video / camera feed)
 TODO video officespace -- POLYMATH (video / camera feed)
 
 TODO in explanation :multiple hallways to show it generalizes
@@ -115,6 +115,8 @@ For example:
 * `["person, child, dog, or bicycle", "car, bus, plane, motorcycle", "grass, sidewalk, street, or parking lot"]` would only be 3 prompts but represent multiple physical classes as a single class ID 
 
 Once the semantic data is in the costmap layer, the costmap costs used by planning, control, and behavior algorithms will be adjusted based on the cost to traverse a particular terrain class (from none, to some, to illegal). This incentivizes the robot to select terrains to plan through or select trajectories within based on your desired behavioral characteristics. 
+
+From our experience, you may want to consider using either a stereo camera set with a large disparity & FOV or multiple depth cameras to fully capture the semantic richness of a scene. While a single Orbbec / Realsense can run this fine, it may not provide as much semantic context as you would otherwise like.
 
 ## SAM3 on AMD X100 Strix Halo
 
