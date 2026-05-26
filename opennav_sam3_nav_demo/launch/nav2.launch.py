@@ -28,21 +28,32 @@ from launch.actions import (
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
-from launch_ros.actions import Node
-from launch_ros.descriptions import ParameterFile
+from launch_ros.actions import LoadComposableNodes, Node
+from launch_ros.descriptions import ComposableNode, ParameterFile
 from nav2_common.launch import RewrittenYaml
-
 
 def generate_launch_description():
     # Get the launch directory
-    bt_navigator_dir = get_package_share_directory('nav2_bt_navigator')
-    opennav_sam3_nav_dir = get_package_share_directory('opennav_sam3_navigation')
+    opennav_sam3_nav_dir = get_package_share_directory('opennav_sam3_nav_demo')
     opennav_sam3_launch_dir = os.path.join(opennav_sam3_nav_dir, 'launch')
+    bringup_dir = get_package_share_directory('nav2_bringup')
+    bt_navigator_dir = get_package_share_directory('nav2_bt_navigator')
+    bt_navigator_dir = get_package_share_directory('nav2_bt_navigator')
 
     # Create the launch configuration variables
     use_sim_time = LaunchConfiguration('use_sim_time')
     params_file = os.path.join(opennav_sam3_nav_dir, 'config', 'nav2_semantic_params.yaml')
     nav2pose_bt_xml = LaunchConfiguration('nav2pose_bt_xml')
+
+    lifecycle_nodes = [
+        'controller_server',
+        'smoother_server',
+        'planner_server',
+        'behavior_server',
+        'bt_navigator',
+        'waypoint_follower',
+        'velocity_smoother',
+        'collision_monitor']
 
     # Create our own temporary YAML files that include substitutions
     param_substitutions = {
@@ -93,14 +104,60 @@ def generate_launch_description():
             parameters=[{'use_sim_time': use_sim_time}]
         ),
 
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(opennav_sam3_launch_dir, 'include', 'navigation.launch.py')),
-            launch_arguments={'use_sim_time': use_sim_time,
-                              'params_file': params_file,
-                              'use_composition': 'True',
-                              'container_name': 'nav2_container',
-                              'nav2pose_bt_xml': nav2pose_bt_xml}.items()),
+        LoadComposableNodes(
+            target_container='nav2_container',
+            composable_node_descriptions=[
+                ComposableNode(
+                    package='nav2_controller',
+                    plugin='nav2_controller::ControllerServer',
+                    name='controller_server',
+                    parameters=[configured_params],
+                    remappings=[('cmd_vel', 'cmd_vel_nav')]),
+                ComposableNode(
+                    package='nav2_smoother',
+                    plugin='nav2_smoother::SmootherServer',
+                    name='smoother_server',
+                    parameters=[configured_params]),
+                ComposableNode(
+                    package='nav2_planner',
+                    plugin='nav2_planner::PlannerServer',
+                    name='planner_server',
+                    parameters=[configured_params]),
+                ComposableNode(
+                    package='nav2_behaviors',
+                    plugin='behavior_server::BehaviorServer',
+                    name='behavior_server',
+                    parameters=[configured_params]),
+                ComposableNode(
+                    package='nav2_bt_navigator',
+                    plugin='nav2_bt_navigator::BtNavigator',
+                    name='bt_navigator',
+                    parameters=[configured_params]),
+                ComposableNode(
+                    package='nav2_waypoint_follower',
+                    plugin='nav2_waypoint_follower::WaypointFollower',
+                    name='waypoint_follower',
+                    parameters=[configured_params]),
+                ComposableNode(
+                    package='nav2_velocity_smoother',
+                    plugin='nav2_velocity_smoother::VelocitySmoother',
+                    name='velocity_smoother',
+                    parameters=[configured_params],
+                    remappings=[('cmd_vel', 'cmd_vel_nav')]),
+                ComposableNode(
+                    package='nav2_collision_monitor',
+                    plugin='nav2_collision_monitor::CollisionMonitor',
+                    name='collision_monitor',
+                    parameters=[configured_params]),
+                ComposableNode(
+                    package='nav2_lifecycle_manager',
+                    plugin='nav2_lifecycle_manager::LifecycleManager',
+                    name='lifecycle_manager_navigation',
+                    parameters=[{'use_sim_time': use_sim_time,
+                                'autostart': True,
+                                'node_names': lifecycle_nodes}]),
+            ],
+        )
     ])
 
     # Create the launch description and populate
