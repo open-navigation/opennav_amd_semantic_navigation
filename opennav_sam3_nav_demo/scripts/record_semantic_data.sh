@@ -15,6 +15,5 @@ ros2 bag record --max-bag-size 3000000000 -s mcap \
     /sensors/camera_0/color/image \
     /sensors/camera_0/depth/camera_info \
     /sensors/camera_0/depth/image \
-    /sensors/camera_0/points \
     /tf \
     /tf_static
