@@ -3,8 +3,10 @@
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.actions import SetEnvironmentVariable
@@ -17,8 +19,7 @@ def generate_launch_description():
 
     params_file = LaunchConfiguration('params_file')
     image_topic = LaunchConfiguration('image_topic')
-    segmentation_topic = LaunchConfiguration('segmentation_topic')
-    label_mask_topic = LaunchConfiguration('label_mask_topic')
+    sensor_processing_pipeline = LaunchConfiguration('sensor_processing_pipeline')
     namespace = LaunchConfiguration('namespace')
     log_level = LaunchConfiguration('log_level')
 
@@ -38,7 +39,6 @@ def generate_launch_description():
                 EnvironmentVariable('PYTHONPATH', default_value=''),
             ],
         ),
-
         DeclareLaunchArgument(
             'params_file',
             default_value=default_params,
@@ -46,18 +46,13 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'image_topic',
-            default_value='/camera/color/image_raw',
+            default_value='/sensors/camera_0/color/image',
             description='Input image topic to remap onto ~/image.',
         ),
         DeclareLaunchArgument(
-            'segmentation_topic',
-            default_value='/sam3/segmentation_mask',
-            description='Output segmentation mask topic to remap onto ~/segmentation_mask.',
-        ),
-        DeclareLaunchArgument(
-            'label_mask_topic',
-            default_value='/sam3/label_mask',
-            description='Output label mask topic to remap onto ~/label_mask.',
+            'sensor_processing_pipeline',
+            default_value='true',
+            description='Whether to process sensor data for use with costmap layer.',
         ),
         DeclareLaunchArgument(
             'namespace',
@@ -79,12 +74,16 @@ def generate_launch_description():
             parameters=[params_file],
             remappings=[
                 ('~/image', image_topic),
-                ('~/segmentation_mask', segmentation_topic),
-                ('~/label_mask', label_mask_topic),
             ],
             additional_env={
                 'LD_PRELOAD': '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
                 '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0'},
             arguments=['--ros-args', '--log-level', log_level],
         ),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([
+                PathJoinSubstitution([
+                    pkg_share, 'launch', 'include', 'sensor_processing_pipeline.launch.py'])]),
+            condition=IfCondition(sensor_processing_pipeline),
+        )
     ])

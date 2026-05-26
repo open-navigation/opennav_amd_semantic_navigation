@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>opennav_sam3_nav_demo</name>
+  <version>1.0.0</version>
+  <description>Demos for navigation using semantic segmentation from SAM3 model</description>
+  <maintainer email="steve@opennav.org">Steve Macenski</maintainer>
+  <license>Apache 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>navigation2</depend>
+  <depend>nav2_bringup</depend>
+  <depend>opennav_sam3_inference</depend>
+  <depend>semantic_segmentation_layer</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
