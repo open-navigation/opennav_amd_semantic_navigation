@@ -67,6 +67,7 @@ Prompts: `"wall or large static objects like furniture, columns, carts, boxes, o
 TODO video hallway -- MY OFFICE (video / camera feed)
 TODO video officespace -- POLYMATH (video / camera feed)
 
+TODO in explanation :multiple hallways to show it generalizes
 
 Prompts: `"wall", "floor"`, whereas the walls are lethal, floor is non-zero low cost to show its contribution clearly
 
