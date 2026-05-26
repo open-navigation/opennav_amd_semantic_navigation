@@ -89,6 +89,8 @@ We all know in our various environments (warehouses, homes, construction, agricu
   <img src="docs/examples.gif" alt="Data Demo" />
 </p>
 
+You can find these examples in the `docs/example/` directory with a test script to easily evaluate a directory of images for evaulation.
+
 There are many uses of semantic data from SAM3. Applications can use it for things like behavior enhancement based on situational awareness, localization pipeline improvement, extracting dynamic obstacles for tracking, and so forth. This demonstration of one such pipeline using it for terrain-aware navigation.
 
 ## Package Structure
