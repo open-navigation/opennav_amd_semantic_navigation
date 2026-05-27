@@ -55,19 +55,22 @@ The accuracy, sharpness, and consistency of the masks is a huge step up from tra
 
 Prompts: `"sidewalk", "grass, trees, or benches"`, whereas the latter is made an illegal cost:
 
-TODO video -- precita park
+TODO video -- precita park + some commentary
 
 Prompts: `"bike lane", "curb, street, plants, or grass"`, whereas the latter prompt is made illegal cost to stay in the bike lane:
 
-TODO video -- bike lane 1x alameda almanc down to humble sea DRONEABLE
+TODO video -- bike lane 1x alameda almanc down to humble sea DRONEABLE + some commentary
 
 ### Indoor Terrain
+
+This demonstration segments the floor simply using `"floor"` in an office environment.
+It does a perfect job, essentially even mapping the freespace of the room without any fine-tuning or even sophisticated prompt engineering. Even for outdoor uses, simply `"sidewalk cement or pavement"` covered all walkable, even if irregular surfaces without an issue.
 
 <p align="center">
   <a href="https://youtu.be/UQdmIIM90WI"><img src="docs/hallway.gif" alt="hallway"/></a>
 </p>
 
-TODO video officespace
+TODO video officespace + some commentary
 
 Prompts: `"wall", "floor"`, whereas the walls are lethal, floor is non-zero low cost to show its contribution clearly
 
@@ -200,8 +203,6 @@ Now you can source the workspace as usual and launch the inference node, even ou
 ```bash
 ros2 launch opennav_sam3_inference sam3_inference.launch.py image_topic:=/my_camera/image_raw
 ```
-
-TODO demo gif
 
 ## Related Projects
 

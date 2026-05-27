@@ -24,7 +24,7 @@ SAM3 is *text-promptable*: you tell it what to find ("person", "pallet", "wet fl
 There is no per-class training step.
 The same model handles indoor floors, outdoor terrain, bike lanes, and arbitrary obstacles, so the costmap can be re-aimed at a new environment by editing a list of strings.
 
-TODO VIDEO
+TODO VIDEO HERO FROM README
 
 Why SAM3 + Why Strix Halo
 =========================
@@ -55,7 +55,7 @@ This tutorial assumes you already have:
 - A robot platform with a depth or stereo camera. We use an Orbbec Gemini 355 and Intel RealSense families, but larger FOV and disparities are beneficial.
 - ``conda`` / ``miniforge`` for the Python environment SAM3 runs in. Install instructions: `miniforge <https://github.com/conda-forge/miniforge>`_.
 
-TODO robot picture
+TODO robot picture (take hero from the demonstrations repo)
 
 Architecture Overview
 =====================
@@ -292,7 +292,11 @@ Open RViz, set the fixed frame, and send a Nav2Goal. With the default prompt set
 - The robot's floor tiles colored low-cost (traversable).
 - Walls colored high-cost (avoid), with the planner routing around them.
 
-TODO hallway video
+.. raw:: html
+
+   <p align="center">
+     <iframe width="640" height="360" src="https://www.youtube.com/embed/UQdmIIM90WI" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+   </p>
 
 
 Real-World Demonstrations
@@ -307,7 +311,15 @@ Indoor Terrain
 
 These demos showcase detecting indoor environment navigable surfaces to know where is safe to drive
 
-TODO hallway video
+This demonstration segments the floor simply using `"floor"` in an office environment.
+It does a perfect job, essentially even mapping the freespace of the room without any fine-tuning or even sophisticated prompt engineering.
+Even for outdoor uses, simply `"sidewalk cement or pavement"` covered all walkable, even if irregular surfaces without an issue.
+
+.. raw:: html
+
+   <p align="center">
+     <iframe width="640" height="360" src="https://www.youtube.com/embed/UQdmIIM90WI" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+   </p>
 
 TODO office video
 
@@ -317,7 +329,7 @@ Outdoor Terrain
 
 These demos showcase detecting outdoor drivable ground surfaces (cement, pavement, sidewalk) while avoiding the street, grass and other non-navigable surfaces
 
-TODO videos
+TODO videos (percita + alameda and commentary)
 
 SAM3 does an amazing job with no fine-tuning across a huge variety of terrain types and environments, which is a game-changer for navigation in unstructured environments.
 The accuracy, sharpness, and consistency of the masks is a huge step up from traditional semantic segmentation models, and the text promptability means you can segment out whatever classes are relevant to your application on Day 1!
