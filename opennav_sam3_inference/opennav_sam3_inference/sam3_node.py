@@ -112,18 +112,37 @@ class Sam3InferenceNode(Node):
             f'(imgsz={imgsz}, onnx_dir={onnx_dir})'
         )
 
-        from opennav_sam3_inference.tracker.live_inference import SAM3Live
-        self._live = SAM3Live(
-            checkpoint=checkpoint,
-            prompts=self._prompts,
-            onnx_dir=onnx_dir,
-            imgsz=imgsz,
-            dtype=torch.float16,
-            device=device,
-            mig=True,
-            max_objects_per_prompt=max_objects,
-            redetect_every=1,
-        )
+        if os.environ.get("SAM3_USE_HYBRID", "0") == "1":
+            from opennav_sam3_inference.tracker.hybrid_inference import SAM3HybridLive
+            _kfe = int(os.environ.get("SAM3_KEYFRAME_EVERY", "5"))
+            self.get_logger().info(
+                f'SAM3_USE_HYBRID=1: instantiating SAM3HybridLive '
+                f'(keyframe_every={_kfe})'
+            )
+            self._live = SAM3HybridLive(
+                checkpoint=checkpoint,
+                prompts=self._prompts,
+                onnx_dir=onnx_dir,
+                imgsz=imgsz,
+                dtype=torch.float16,
+                device=device,
+                mig=True,
+                keyframe_every=_kfe,
+                max_objects_per_prompt=max_objects,
+            )
+        else:
+            from opennav_sam3_inference.tracker.live_inference import SAM3Live
+            self._live = SAM3Live(
+                checkpoint=checkpoint,
+                prompts=self._prompts,
+                onnx_dir=onnx_dir,
+                imgsz=imgsz,
+                dtype=torch.float16,
+                device=device,
+                mig=True,
+                max_objects_per_prompt=max_objects,
+                redetect_every=1,
+            )
 
         self._prompt_to_class_id = dict(zip(self._prompts, self._class_ids))
 
