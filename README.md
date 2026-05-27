@@ -65,7 +65,7 @@ TODO video -- bike lane 1x alameda almanc down to humble sea DRONEABLE
 
 Prompts: `"wall or large static objects like furniture, columns, carts, boxes, or trash cans", "floor", "person, dog, or cat"`, whereas the first is lethal, floor is non-zero low cost, and person is high non-lethal cost
 
-[![hallway](hallway.gif)](https://youtu.be/UQdmIIM90WI)
+[![hallway](docs/hallway.gif)](https://youtu.be/UQdmIIM90WI)
 
 TODO video officespace
 
