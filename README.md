@@ -47,18 +47,19 @@ With terrain labels in the costmap, the robot can:
 
 These demonstrations are performed in a few unique cases to showcase the value of terrain segmentation. In each, we configure the SAM3 inference node & semantic segmentation layer with slightly different prompts and costs. We can do so without any fine-tuning or retraining to segment out the surfaces or objects of interest in each. We also perform navigation without the use of depth-based costmap layers (semantic segmentation only!), but that should be seriously considered as a backup for deployed applications.
 
+Note that these demos reveal something interesting: a technique like this can be used to effectively annotate a space during mapping to have global semantic data!
+SAM3 does an amazing job with no fine-tuning across a huge variety of terrain types and environments, which is a game-changer for navigation in unstructured environments.
+The accuracy, sharpness, and consistency of the masks is a huge step up from traditional semantic segmentation models, and the text promptability means you can segment out whatever classes are relevant to your application on Day 1!
 
 ### Outdoor Terrain
 
 Prompts: `"sidewalk", "grass, trees, or benches"`, whereas the latter is made an illegal cost:
 
 TODO video -- precita park
-TODO video -- Main Street Linear Park Alameda // A-7 Corsair II Static Aircraft Display DRONEABLE
 
 Prompts: `"bike lane", "curb, street, plants, or grass"`, whereas the latter prompt is made illegal cost to stay in the bike lane:
 
 TODO video -- bike lane 1x alameda almanc down to humble sea DRONEABLE
-TODO video -- left/right lane alameda on well marked road (try it) DRONEABLE
 
 ### Indoor Terrain
 
@@ -67,19 +68,7 @@ Prompts: `"wall or large static objects like furniture, columns, carts, boxes, o
 DONE: TODO video hallway -- MY OFFICE (video / camera feed)
 TODO video officespace -- POLYMATH (video / camera feed)
 
-TODO in explanation :multiple hallways to show it generalizes
-
 Prompts: `"wall", "floor"`, whereas the walls are lethal, floor is non-zero low cost to show its contribution clearly
-
-Note that this size of space reveals something interesting which others don't given the narrow FOV of the single sensor feed: a technique like this can be used to effectively annotate a space during mapping to have global semantic data!
-
-DONE: TODO video my officespace built in rviz only (no camera for privacy) -- MY OFFICE 
-
-### TODO -- DRONABLE/heroable
-
-Trails? Glen canyon/pt reyes/stern grove
-4-square plaza (dronable?) WHILE IN ALAMEDA
-
 
 ### Bonus: Some Motivating Ideas!
 

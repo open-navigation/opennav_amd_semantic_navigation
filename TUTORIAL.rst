@@ -18,7 +18,7 @@ This tutorial walks through running a live, text-promptable semantic segmentatio
 
 - The SAM3 inference node running on the X100's GPU and publishing high resolution per-pixel class masks at 5-10 Hz.
 - A Nav2 stack configured to consume those masks through the `semantic_segmentation_layer <https://github.com/kiwicampus/semantic_segmentation_layer>`_ costmap plugin to set costs based on the terrain and/or obstacle types.
-- The ability to *change segmentation prompts at runtime* - swap from ``["floor", "wall"]`` to ``["sidewalk", "grass, trees, or benches"]`` to ``["pallet", "puddle"]`` without restarting anything.
+- The ability to plan and control based on semantics like terrain, small hard to see obstacles, dynamic agents, and more.
 
 SAM3 is *text-promptable*: you tell it what to find ("person", "pallet", "wet floor sign", "curb", "mud", "ceiling", ...) and it returns masks for each class.
 There is no per-class training step.
@@ -50,18 +50,17 @@ Requirements
 
 This tutorial assumes you already have:
 
-- AMD X100 Strix Halo running **Ubuntu**. We use the `GMKtec EVO-X2 AI Mini PC <https://www.gmktec.com/products/amd-ryzen%E2%84%A2-ai-max-395-evo-x2-ai-mini-pc>`_
+- AMD X100 Strix Halo running Ubuntu. We use the `GMKtec EVO-X2 AI Mini PC <https://www.gmktec.com/products/amd-ryzen%E2%84%A2-ai-max-395-evo-x2-ai-mini-pc>`_
 - ROS 2 Jazzy or newer installed
-- A robot platform with a depth camera that produces an RGB image and a registered, aligned pointcloud. We use an Orbbec Gemini 355 and Intel RealSense families, but larger FOV and disparities are beneficial.
+- A robot platform with a depth or stereo camera. We use an Orbbec Gemini 355 and Intel RealSense families, but larger FOV and disparities are beneficial.
 - ``conda`` / ``miniforge`` for the Python environment SAM3 runs in. Install instructions: `miniforge <https://github.com/conda-forge/miniforge>`_.
-- A `Hugging Face <https://huggingface.co>`_ account if you intend to download the SAM3 weights from the official Meta repository.
 
 TODO robot picture
 
 Architecture Overview
 =====================
 
-The pipeline takes in synchronized and aligned RGB image and pointcloud from the camera, runs SAM3 interence to produce a label mask of classes.
+The pipeline takes in synchronized and aligned RGB image and pointcloud from the camera and runs SAM3 interence to produce a label mask of classes.
 Then, the ``label_mask`` is resized to a lower resolution with the pointcloud to pass onto the costmap layer for processing.
 It is not required to resize the label mask, but it is a common practice to reduce the computational load on the costmap layer.
 There is little benefit to using a 504x504 or 1008x1008 mask in the costmap layer with ~2-5cm resolution cells for a local 3-10m horizon.
@@ -101,7 +100,19 @@ If you already cloned without ``--recursive`` (to get the costmap layer submodul
    cd opennav_amd_semantic_navigation
    git submodule update --init --recursive
 
-1 - Get the SAM3 weights
+1 - Install ROCm and Python dependencies
+----------------------------------------
+
+The ``opennav_sam3_inference`` package ships a one-shot setup script that installs the pinned ROCm 7.2 stack, a patched MIGraphX 2.15, an ``opennav-sam3-inference`` conda environment with ROCm-nightly PyTorch + ``onnxruntime-migraphx``, and (optionally) the model weights
+That sounds like alot, but basically it sets up the right versions of AMD's software, AI optimization libraries, and PyTorch so that everyone plays nicely and there is no dependency hell.
+You can review the setup script easily yourself to see exactly what happens.
+
+.. code-block:: bash
+
+   cd <your_ros2_ws>/src/opennav_amd_semantic_navigation/opennav_sam3_inference
+   ./setup.sh
+
+2 - Get the SAM3 weights
 ------------------------
 
 SAM3's weights (~3.3 GB) are not redistributed with the repo and must be obtained from Hugging Face.
@@ -114,19 +125,6 @@ Finally:
    .. code-block:: bash
 
       hf download facebook/sam3 model.safetensors --local-dir model/sam3
-
-2 - Install ROCm and Python dependencies
-----------------------------------------
-
-The ``opennav_sam3_inference`` package ships a one-shot setup script that installs the pinned ROCm 7.2 stack, a patched MIGraphX 2.15, an ``opennav-sam3-inference`` conda environment with ROCm-nightly PyTorch + ``onnxruntime-migraphx``, and (optionally) the model weights
-That sounds like alot, but basically it sets up the right versions of AMD's software, AI optimization libraries, and PyTorch so that everyone plays nicely and there is no dependency hell.
-You can review the setup script easily yourself to see exactly what happens.
-
-.. code-block:: bash
-
-   cd <your_ros2_ws>/src/opennav_amd_semantic_navigation/opennav_sam3_inference
-   ./setup.sh
-
 
 3 - Build the SAM3 inference artifacts
 --------------------------------------
@@ -301,86 +299,39 @@ Real-World Demonstrations
 =========================
 
 The same setup, with three different prompt configurations, applied to three classes of environment.
+See the github repository for more details on the prompts and configurations used for each.
+Note that these demos reveal something interesting: a technique like this can be used to effectively annotate a space during mapping to have global semantic data!
 
 Indoor Terrain
 --------------
 
-Prompts: ``["wall or large static objects like furniture, columns, carts, boxes, or trash cans", "floor", "person, dog, or cat"]``. Costs: walls and static objects are lethal, floor is low-cost (preferred), people / animals are high non-lethal cost so the planner gives them a wide berth but does not hard-fail.
+These demos showcase detecting indoor environment navigable surfaces to know where is safe to drive
 
-.. todo::
+TODO hallway video
 
-   Indoor video #1 - the existing office hallway demo (already captured per
-   ``README.md:67``). Embed as a YouTube iframe via ``.. raw:: html``.
+TODO office video
 
-.. todo::
-
-   Indoor video #2 - Polymath office shoot (``README.md:68``). Should show the same
-   prompts generalizing to a different indoor space without any reconfiguration.
-
-.. todo::
-
-   Indoor video #3 - multiple hallways in one continuous clip (``README.md:70``) to
-   make the "the same model handles all of these without retraining" point visually.
-
-.. note::
-
-   This kind of single-camera sweep also exposes a useful side-effect: as the robot
-   rotates and translates, the costmap layer accumulates semantic observations of
-   walls, floor, and other classes across the entire space. With a longer
-   ``tile_map_decay_time``, this effectively *annotates the static map during mapping*
-   with semantic information - a building block for global semantic maps.
 
 Outdoor Terrain
 ---------------
 
-Two prompt configurations for two outdoor cases.
+These demos showcase detecting outdoor drivable ground surfaces (cement, pavement, sidewalk) while avoiding the street, grass and other non-navigable surfaces
 
-**Sidewalks vs. non-sidewalks.** Prompts: ``["sidewalk", "grass, trees, or benches"]``, with the second class as lethal cost. The planner stays on the sidewalk and treats grass/trees/benches as obstacles.
+TODO videos
 
-.. todo::
-
-   Outdoor video #1 - Precita Park, San Francisco (``README.md:55``).
-
-.. todo::
-
-   Outdoor video #2 - Main Street Linear Park / A-7 Corsair II static aircraft
-   display, Alameda (``README.md:56``, droneable).
-
-**Bike lanes.** Prompts: ``["bike lane", "curb, street, plants, or grass"]``, with the second class as lethal cost. Same idea, different surface class.
-
-.. todo::
-
-   Bike-lane video #1 - Alameda bike lane down to Humble Sea (``README.md:60``,
-   droneable).
-
-.. todo::
-
-   Bike-lane video #2 - left/right lane on a well-marked road in Alameda
-   (``README.md:61``, droneable).
-
-.. todo::
-
-   Trail / plaza video - Glen Canyon, Point Reyes, Stern Grove, or the 4-square
-   plaza in Alameda (``README.md:78-81``). Should show the system handling
-   irregular natural surfaces rather than engineered paths.
+SAM3 does an amazing job with no fine-tuning across a huge variety of terrain types and environments, which is a game-changer for navigation in unstructured environments.
+The accuracy, sharpness, and consistency of the masks is a huge step up from traditional semantic segmentation models, and the text promptability means you can segment out whatever classes are relevant to your application on Day 1!
 
 Difficult Small Obstacles
 -------------------------
 
-The previous demos showcase terrain. The other side of foundation-model perception is that you can ask SAM3 about specific things - cables on the floor, a puddle, a piece of debris, a low-profile pallet - without training a detector for each one.
+The previous demos showcase terrain.
+The other side of foundation-model perception is that you can ask SAM3 about specific things like cables on the floor, a puddle, a piece of debris, a low-profile pallet without training a detector for each one.
+I hope these provide some motivational examples of use-cases of SAM3 to detect and avoid obstacles (or adjust robot behavior) in situations that have been traditionally difficult for robots :-)
 
 .. image:: docs/examples.gif
     :width: 90%
     :align: center
     :alt: SAM3 detecting cables, spills, debris, pallets, and other low-profile obstacles across various test images
 
-Example prompt sets we have used:
-
-.. code-block:: text
-
-   ["cable or wire on the floor"]
-   ["puddle or spill on the floor"]
-   ["pallet or empty pallet jack"]
-   ["wet floor sign"]
-
-Each of these can be added or swapped at runtime via ``~/change_prompt``. None of them required collecting data or retraining anything.
+Happy segmenting!
