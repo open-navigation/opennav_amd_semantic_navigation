@@ -69,6 +69,7 @@ This, however, obviously ignores other objects in the scene like trash cans, cha
 </p>
 
 You can do more than just two classes though to get really nice semantic information about the environment. For example, this demonstraion segments out the `["floor", "wall", "desk", "chair", "shelf or cabinet"]` to give a much richer understanding of the environment for navigation and behavior decisions.
+Note the color changes for relative costs of various objects and surfaces to highlight the differences (even if a little subtle).
 
 <p align="center">
   <a href="https://youtu.be/jL1m8J5KgRs"><img src="docs/office.gif" alt="office"/></a>
