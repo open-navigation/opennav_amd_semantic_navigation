@@ -66,16 +66,15 @@ TODO video -- bike lane 1x alameda almanc down to humble sea DRONEABLE
 
 ### Indoor Terrain
 
-This demonstration segments the floor simply using `"floor"` in an office environment.
+This demonstration segments the floor simply using `"floor"` and walls using `"wall"` in an office environment.
 It does a perfect job, essentially even mapping the freespace of the room without any fine-tuning or even sophisticated prompt engineering.
+This, however, obviously ignores other objects in the scene like trash cans, chairs, desks, etc which are necessary to consider for a complete navigation solution.
 
 <p align="center">
   <a href="https://youtu.be/UQdmIIM90WI"><img src="docs/hallway.gif" alt="hallway"/></a>
 </p>
 
 TODO video officespace + some commentary
-
-Prompts: `"wall", "floor"`, whereas the walls are lethal, floor is non-zero low cost to show its contribution clearly
 
 ### Bonus: Some Motivating Ideas!
 
