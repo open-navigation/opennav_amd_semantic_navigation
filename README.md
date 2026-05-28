@@ -1,20 +1,20 @@
-# Semantic SAM3 Navigation on AMD X100 Strix Halo
+# Semantic SAM3 Navigation on AMD Strix Halo
 
-This repository hosts a demonstration of using generalized semantic segmentation for autonomous navigation with [Nav2](https://docs.nav2.org/), running on the edge on a [AMD X100 Strix Halo](https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html) using Meta's [SAM3](https://ai.meta.com/sam3) foundation model for text-prompted semantic segmentation. It turns a camera stream into a live, locally-run text/image-based segmentation of the robot's environment that Nav2 can reason about for **terrain-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, **changing situational context**, and handling of **dynamic obstacles**, and much more.
+This repository hosts a demonstration of using generalized semantic segmentation for autonomous navigation with [Nav2](https://docs.nav2.org/), running on the edge on a [AMD Strix Halo](https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html) using Meta's [SAM3](https://ai.meta.com/sam3) foundation model for text-prompted semantic segmentation. It turns a camera stream into a live, locally-run text/image-based segmentation of the robot's environment that Nav2 can reason about for **terrain-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, **changing situational context**, and handling of **dynamic obstacles**, and much more.
 
 This enables applications to:
 
   * Make trade-offs in planning and control about navigating via certain surfaces over others. For example, prefer sidewalks over grass (while strictly avoiding street), prefer wide open areas over confined aisles, avoid spills or puddles where possible, etc.
 
-  * Detect small objects on the ground or far away objects difficult to pick up on depth cameras or lidars, in a generalized way without having to know every possible object you may encounter
+  * Detect small objects on the ground (i.e. cables, debris) or far away objects difficult to pick up on depth cameras or lidars important to an application, in a generalized way without having to know every possible object you may encounter
 
-  * Make decisions about the nature of the situation the robot is currently in to adjust its behavior or algorithms. For example if in confined vs open space, in an area approaching another robot/human/vehicle, or in a situation with lots of commotion. Might be useful in behavior trees ;-) 
+  * Make decisions about the nature of the situation the robot is currently in to adjust its behavior or algorithms. For example if in confined vs open space, in an area approaching another robot/human/vehicle, or treating particular objects differently. Might be useful in behavior trees ;-) 
 
   * Find common dynamic objects without training on each specific type to remove from the static scene for dynamic tracking and/or localization improvements.
 
   * The list goes on! If you can imagine it, it can be integrated into a behavior tree, navigation algorithm, or costmap layer. Doubly so for application-specific tasks.
 
-This demonstrates state-of-the-art foundation model workflows using AMD's "Strix Halo" or X100 - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with 32 powerful x86 CPU cores to boot. The newest generations of AI-enabled processors are absolutely amazing for robotics (NPU, GPU, FPGA, 32x x86 cores) workloads.
+This demonstrates state-of-the-art foundation model workflows using AMD's Strix Halo - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with 32 powerful x86 CPU cores to boot. The newest generations of AI-enabled processors are absolutely amazing for robotics (NPU, GPU, FPGA, 32x x86 cores) workloads.
 
 TODO video of the navigation + mask (concise) / drone??? Main hero video
 TODO Video matrix + glamor shot:
@@ -31,7 +31,7 @@ SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text p
 | 2       |  183.3 (5.45 Hz)   |  136.0 (7.35 Hz)      |
 | 4       |  305.6 (3.27 Hz)   |  211.3 (4.73 Hz)      |
 
-The choice of redetecting each frame or not can depend on the FOV of the sensor and how dynamic your environment is. **5-10 Hz for a server class semantic segmentation algorithm is very impressive on the X100 Strix Halo!** 
+The choice of redetecting each frame or not can depend on the FOV of the sensor and how dynamic your environment is. **5-10 Hz for a server class semantic segmentation algorithm is very impressive on the Strix Halo!** 
 
 ## Real-World Tech Demonstrations
 
@@ -39,17 +39,11 @@ These demonstrations shows **terrain-aware navigation** using SAM3's semantic se
 
 Traditional depth-only perception tells you where obstacles are, but not what they are or how you should treat it. It also struggles with small or thin obstacles (cables, low curbs, debris) and distant objects beyond its effective range. Semantic segmentation fills this gap by labeling every pixel with what it actually is, even in situations where depth is out of range.
 
-With terrain labels in the costmap, the robot can:
+With terrain labels in the costmap, the robot can do all of the main applications described above: prefering certain surfaces over others, detecting small or hard to see obstacles, or treating particular objects differently in perception, planning, control, or localization pipelines.
 
-* **Prefer certain surfaces over others**: plan through sidewalks instead of grass, stay on a gravel path or trail, strictly avoid streets or restricted areas.
-* **Detect small or hard-to-see obstacles**: thin poles, low-profile objects on the ground, puddles, holes, or items at distances beyond typical stereo/ToF range in a generalized way without training a detector or segmentation model for each one.
-* **Distinguish objects apart**: detect particular objects and treat them differently in a perception pipeline (also localization or behavioral pipeline)
+These demonstrations are performed in a few unique cases to showcase the value of terrain segmentation. In each, we configure the SAM3 inference node & semantic segmentation layer with slightly different prompts and costs. We can do so without any fine-tuning or retraining to segment out the surfaces or objects of interest in each. We also perform navigation without the use of other costmap layers (semantic segmentation only!), but that should be considered for deployed applications.
 
-These demonstrations are performed in a few unique cases to showcase the value of terrain segmentation. In each, we configure the SAM3 inference node & semantic segmentation layer with slightly different prompts and costs. We can do so without any fine-tuning or retraining to segment out the surfaces or objects of interest in each. We also perform navigation without the use of depth-based costmap layers (semantic segmentation only!), but that should be seriously considered as a backup for deployed applications.
-
-Note that these demos reveal something interesting: a technique like this can be used to effectively annotate a space during mapping to have global semantic data!
-SAM3 does an amazing job with no fine-tuning across a huge variety of terrain types and environments, which is a game-changer for navigation in unstructured environments.
-The accuracy, sharpness, and consistency of the masks is a huge step up from traditional semantic segmentation models, and the text promptability means you can segment out whatever classes are relevant to your application on Day 1!
+SAM3 does an amazing job on Day 1 with no fine-tuning or detailed prompt-engineering across a huge variety of terrain types and environments, which is a game-changer for navigation in unstructured environments.
 
 ### Outdoor Terrain
 
@@ -117,7 +111,7 @@ Once the semantic data is in the costmap layer, the costmap costs used by planni
 
 From our experience, you may want to consider using either a stereo camera set with a large disparity & FOV or multiple depth cameras to fully capture the semantic richness of a scene. While a single Orbbec / Realsense can run this fine, it may not provide as much semantic context as you would otherwise like.
 
-## SAM3 on AMD X100 Strix Halo
+## SAM3 on AMD Strix Halo
 
 The SAM3 semantic segmentation node publishes three outputs:
 
@@ -152,6 +146,8 @@ The following parameters are also provided:
 | `start_enabled` | `bool` | `true` | If `false`, the node loads and compiles the model but returns early from the image callback until `~/enable` is called with `data: true`. |
 | `max_objects_per_prompt` | `int` | `5` | Cap on simultaneously tracked objects per prompt. Excess (lowest score) are evicted via session.remove_object so the tracker stops propagating them. |
 | `redetect_every` | `int` | `1` | Does the full SAM3 detection after the given number of frames to ensure new objects/people are detected over time. All the intermediate frames does tracker propagation on just the previous detections |
+
+We want to especially thank Harry Sun at AMD for doing an incredible job with the SAM3 tracker implementation in collaboration with this work.
 
 #### Get Access to SAM3
 
@@ -208,6 +204,6 @@ ros2 launch opennav_sam3_inference sam3_inference.launch.py image_topic:=/my_cam
 
 ## Related Projects
 
-*   [opennav_amd_demonstrations](https://github.com/open-navigation/opennav_amd_demonstrations): companion project demonstrating indoor 2D, urban 3D, outdoor GPS-based navigation, and now semantic segmentation navigation on Ryzen AI / X100 computers with the Honeybee reference platform.
+*   [opennav_amd_demonstrations](https://github.com/open-navigation/opennav_amd_demonstrations): companion project demonstrating indoor 2D, urban 3D, outdoor GPS-based navigation, and now semantic segmentation navigation on Ryzen AI / Strix Halo computers with the Honeybee reference platform.
 *   [Nav2](https://github.com/ros-navigation/navigation2): the ROS 2 navigation stack this work plugs into.
 *   [Ryzers](https://github.com/AMDResearch/Ryzers): Pre-configured and optimized docker images for AI on AMD GPUs

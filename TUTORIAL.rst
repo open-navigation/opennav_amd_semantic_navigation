@@ -1,7 +1,7 @@
 .. _sam3_navigation_on_amd_strix_halo:
 
-Navigating with Semantic Segmentation (SAM3, AMD X100 Strix Halo)
-*****************************************************************
+Navigating with Semantic Segmentation (SAM3, AMD Strix Halo)
+************************************************************
 
 - `Overview`_
 - `Why SAM3 + Why Strix Halo`_
@@ -14,9 +14,9 @@ Navigating with Semantic Segmentation (SAM3, AMD X100 Strix Halo)
 Overview
 ========
 
-This tutorial walks through running a live, text-promptable semantic segmentation costmap for `Nav2 <https://docs.nav2.org/>`_ on the edge, using Meta's `SAM3 <https://ai.meta.com/sam3>`_ foundation model on an `AMD X100 Strix Halo <https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html>`_. By the end you will have:
+This tutorial walks through running a live, text-promptable semantic segmentation costmap for `Nav2 <https://docs.nav2.org/>`_ on the edge, using Meta's `SAM3 <https://ai.meta.com/sam3>`_ foundation model on an `AMD Strix Halo <https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html>`_. By the end you will have:
 
-- The SAM3 inference node running on the X100's GPU and publishing high resolution per-pixel class masks at 5-10 Hz.
+- The SAM3 inference node running on the Strix Halo's GPU and publishing high resolution per-pixel class masks at 5-10 Hz.
 - A Nav2 stack configured to consume those masks through the `semantic_segmentation_layer <https://github.com/kiwicampus/semantic_segmentation_layer>`_ costmap plugin to set costs based on the terrain and/or obstacle types.
 - The ability to plan and control based on semantics like terrain, small hard to see obstacles, dynamic agents, and more.
 
@@ -41,16 +41,16 @@ The "class list" is whatever you typed in the launch parameter, and you can chan
 That is a key property that makes a single model useful across warehouses, sidewalks, farms, and construction sites without retraining possible.
 
 Running a server-class foundation model at 5-10 Hz on a robot is the other half of the story.
-The AMD X100 Strix Halo (Ryzen AI Max+ 395) pairs an NPU and a Radeon GPU with 32 x86 cores and unified memory in a single package, so SAM3 fits and runs on the edge without an external accelerator.
+The AMD Strix Halo (Ryzen AI Max+ 395) pairs an NPU and a Radeon GPU with 32 x86 cores and unified memory in a single package, so SAM3 fits and runs on the edge without an external accelerator.
 That same compute is available for everything else a modern robot might want to run locally (i.e. detectors, VLMs, VLAs, LLMs, planners) without needing another GPU-forwar device.
-The X100 / Strix Halo has as much CPU power as a high-end AMD laptop and as much GPU as a Jetson, married together to enable this.
+The Strix Halo has as much CPU power as a high-end AMD laptop and as much GPU as a Jetson, married together to enable this.
 
 Requirements
 ============
 
 This tutorial assumes you already have:
 
-- AMD X100 Strix Halo running Ubuntu. We use the `GMKtec EVO-X2 AI Mini PC <https://www.gmktec.com/products/amd-ryzen%E2%84%A2-ai-max-395-evo-x2-ai-mini-pc>`_
+- AMD Strix Halo running Ubuntu. We use the `GMKtec EVO-X2 AI Mini PC <https://www.gmktec.com/products/amd-ryzen%E2%84%A2-ai-max-395-evo-x2-ai-mini-pc>`_
 - ROS 2 Jazzy or newer installed
 - A robot platform with a depth or stereo camera. We use an Orbbec Gemini 355 and Intel RealSense families, but larger FOV and disparities are beneficial.
 - ``conda`` / ``miniforge`` for the Python environment SAM3 runs in. Install instructions: `miniforge <https://github.com/conda-forge/miniforge>`_.
@@ -129,7 +129,7 @@ Finally:
 3 - Build the SAM3 inference artifacts
 --------------------------------------
 
-The SAM3 model has to be compiled into ONNX/MIGraphX artifacts for the X100's GPU.
+The SAM3 model has to be compiled into ONNX/MIGraphX artifacts for the GPU.
 This runs once per resolution and takes ~18 minutes for the default 504-pixel input.
 You may use the full 1008 resolution, but this takes more inference time with little to no improvement in the quality of masks.
 
