@@ -319,9 +319,13 @@ Indoor Terrain
 
 These demos showcase detecting indoor environment navigable surfaces to know where is safe to drive
 
-This demonstration segments the floor simply using `"floor"` in an office environment.
+These demonstrations segments the floor simply using `"floor"` in an office environment.
 It does a perfect job, essentially even mapping the freespace of the room without any fine-tuning or even sophisticated prompt engineering.
 Even for outdoor uses, simply `"sidewalk cement or pavement"` covered all walkable, even if irregular surfaces without an issue.
+
+You can do more than just two classes though to get really nice semantic information about the environment.
+For example, the second demonstration segments out the `["floor", "wall", "desk", "chair", "shelf or cabinet"]` to give a much richer understanding of the environment for navigation and behavior decisions.
+
 
 .. raw:: html
 
@@ -329,7 +333,9 @@ Even for outdoor uses, simply `"sidewalk cement or pavement"` covered all walkab
      <iframe width="640" height="360" src="https://www.youtube.com/embed/UQdmIIM90WI" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
    </p>
 
-TODO office video
+   <p align="center">
+     <iframe width="640" height="360" src="https://www.youtube.com/embed/jL1m8J5KgRs" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+   </p>
 
 
 Outdoor Terrain

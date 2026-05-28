@@ -68,7 +68,11 @@ This, however, obviously ignores other objects in the scene like trash cans, cha
   <a href="https://youtu.be/UQdmIIM90WI"><img src="docs/hallway.gif" alt="hallway"/></a>
 </p>
 
-TODO video officespace + some commentary
+You can do more than just two classes though to get really nice semantic information about the environment. For example, this demonstraion segments out the `["floor", "wall", "desk", "chair", "shelf or cabinet"]` to give a much richer understanding of the environment for navigation and behavior decisions.
+
+<p align="center">
+  <a href="https://youtu.be/jL1m8J5KgRs"><img src="docs/office.gif" alt="office"/></a>
+</p>
 
 ### Bonus: Some Motivating Ideas!
 
