@@ -87,6 +87,8 @@ class SAM3Live:
         keep_recent_frames: int = 0,
         redetect_every: int = 1,
         max_objects_per_prompt: int | dict[str, int] | None = 5,
+        bootstrap_frames: int = 0,
+        bootstrap_min_score: float = 0.3,
     ):
         """
         Args:
@@ -130,6 +132,19 @@ class SAM3Live:
                   prompts not listed are uncapped
                 - ``None``: unlimited — only safe when you know the scene's
                   true object count is small (e.g. single tracked target).
+            bootstrap_frames: PoC switch — if > 0, run text prompts on the
+                first N frames AS USUAL to anchor the concept, then auto-extract
+                visual exemplar embeddings from the high-confidence decoder
+                queries on those frames and swap them into the cached
+                ``session.prompt_embeddings[prompt_id]`` so frame N+ runs
+                detection against site-specific visual signatures instead of
+                CLIP text. The customer API (text prompts in yaml) is unchanged.
+                Default 0 = disabled (pure text mode, original behavior).
+            bootstrap_min_score: per-query confidence floor (sigmoid of
+                pred_logits * presence) for a query to be collected into the
+                bootstrap pool. Default 0.3 — somewhat permissive to collect
+                more samples in the few frames available; tighten if exemplar
+                quality is bad.
         """
         # Lazy import so that consumers of this module don't pay model import cost
         # if they only want the class definition.
@@ -146,6 +161,26 @@ class SAM3Live:
         self._force_detect_next = True
         # Monotonic count of calls to infer() — drives the redetect schedule.
         self._infer_calls = 0
+        # Bootstrap-to-exemplar PoC state (see bootstrap_frames docstring).
+        # Approach (Path C - box prompts): during bootstrap collect high-conf
+        # pred_boxes per prompt; after bootstrap, inject them as input_boxes
+        # on every subsequent detector call. Boxes are stored in
+        # CxCyWH normalized [0,1] format (matches Sam3GeometryEncoder input).
+        self.bootstrap_frames = max(0, int(bootstrap_frames))
+        self.bootstrap_min_score = float(bootstrap_min_score)
+        self._bootstrap_remaining: dict[int, int] = {}
+        # During bootstrap: per-prompt accumulator of high-conf pred_boxes.
+        # After bootstrap done: per-prompt stored exemplar boxes (tensor).
+        self._exemplar_box_pool: dict[int, list[torch.Tensor]] = {}
+        self._exemplar_boxes: dict[int, torch.Tensor] = {}  # [num_boxes, 4] cxcywh [0,1]
+        # Forward-hook capture for the current infer() call. List of
+        # (pred_logits, pred_boxes, presence_logits) per detector call.
+        self._bootstrap_capture: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]] = []
+        # Per-infer counter of detector_model calls — used by the box-inject
+        # pre-hook to figure out which prompt is being processed.
+        self._detector_call_counter = 0
+        self._bootstrap_hook_handle = None
+        self._box_inject_hook_handle = None
         # Monotonic frame_idx we hand to model.forward. We MUST assign this
         # ourselves rather than letting HF auto-assign, because HF computes
         # the next idx as ``len(processed_frames)`` — which collides with
@@ -199,9 +234,15 @@ class SAM3Live:
             max_vision_features_cache_size=max_vision_features_cache_size,
         )
 
+        # Bootstrap hook on detector_model — captures decoder_hidden_states
+        # + pred_logits per detector call. No-op if bootstrap_frames=0.
+        if self.bootstrap_frames > 0:
+            self._install_bootstrap_hook()
+
         # Add initial prompts (deduped + encoded by the processor).
         self.set_prompts(prompts)
-        print(f"[SAM3Live] ready. prompts={list(self.session.prompts.values())}")
+        print(f"[SAM3Live] ready. prompts={list(self.session.prompts.values())} "
+              f"bootstrap_frames={self.bootstrap_frames}")
 
     # ------------------------------------------------------------------
     # MIG patch wiring (mirrors demo_text.py)
@@ -248,6 +289,151 @@ class SAM3Live:
         print(f"  batched_mask_decoder patch applied (active for N>1 obj)")
 
     # ------------------------------------------------------------------
+    # Bootstrap-to-exemplar PoC plumbing
+    # ------------------------------------------------------------------
+    def _install_bootstrap_hook(self) -> None:
+        """Install two hooks on ``detector_model``:
+
+        1. **Forward hook** (capture) — collects ``pred_logits``, ``pred_boxes``,
+           ``presence_logits`` from each detector call. Used during bootstrap
+           to extract high-confidence boxes per prompt.
+        2. **Forward pre-hook** (inject) — once bootstrap is complete for a
+           prompt, injects that prompt's stored exemplar boxes as
+           ``input_boxes`` into the detector forward kwargs. Per-call
+           prompt attribution uses ``self._detector_call_counter`` which is
+           reset to 0 at the start of each infer().
+        """
+        detector = self.model.detector_model
+
+        def detector_hook(module, args, kwargs, output):
+            try:
+                pred_logits = getattr(output, "pred_logits", None)
+                pred_boxes = getattr(output, "pred_boxes", None)
+                presence_logits = getattr(output, "presence_logits", None)
+                if pred_logits is None or pred_boxes is None:
+                    if not getattr(self, "_bootstrap_hook_warned", False):
+                        attrs = [a for a in dir(output) if not a.startswith("_")]
+                        print(f"[SAM3Live] bootstrap hook: pred_logits={pred_logits is not None} "
+                              f"pred_boxes={pred_boxes is not None}. Attrs: {attrs[:20]}",
+                              flush=True)
+                        self._bootstrap_hook_warned = True
+                    return
+                self._bootstrap_capture.append(
+                    (pred_logits.detach(), pred_boxes.detach(),
+                     presence_logits.detach() if presence_logits is not None else None)
+                )
+            except Exception as e:
+                print(f"[SAM3Live] bootstrap hook exception: {e}", flush=True)
+
+        def box_inject_pre_hook(module, args, kwargs):
+            # Look up which prompt is currently being processed via call counter.
+            prompt_ids = list(self.session.prompts.keys())
+            idx = self._detector_call_counter
+            self._detector_call_counter += 1
+            if idx >= len(prompt_ids):
+                return  # call out of expected range — skip injection
+            pid = prompt_ids[idx]
+            boxes = self._exemplar_boxes.get(pid)
+            if boxes is None:
+                return  # bootstrap not yet done for this prompt
+            if kwargs.get("input_boxes") is not None:
+                return  # caller already supplied boxes — don't override
+            num_boxes = boxes.shape[0]
+            # Inject:
+            #   input_boxes:        [1, num_boxes, 4]  (cxcywh [0,1])
+            #   input_boxes_labels: [1, num_boxes]     (1 = positive)
+            kwargs["input_boxes"] = boxes.to(
+                dtype=self.dtype, device=self.device,
+            ).unsqueeze(0)
+            kwargs["input_boxes_labels"] = torch.ones(
+                1, num_boxes, dtype=torch.long, device=self.device,
+            )
+            return args, kwargs
+
+        self._bootstrap_hook_handle = detector.register_forward_hook(detector_hook, with_kwargs=True)
+        self._box_inject_hook_handle = detector.register_forward_pre_hook(
+            box_inject_pre_hook, with_kwargs=True,
+        )
+        print(f"[SAM3Live] bootstrap hooks installed (capture + box-inject)")
+
+    def _process_bootstrap_capture(self) -> None:
+        """Consume ``self._bootstrap_capture`` from the just-completed infer
+        call. Collects high-confidence pred_boxes per prompt; when a prompt
+        has used its full bootstrap budget, stores the representative box
+        set in ``self._exemplar_boxes[prompt_id]``. From the next infer onward,
+        the box-inject pre-hook automatically passes those boxes as
+        ``input_boxes`` on the per-prompt detector call so SAM3's geometry
+        encoder spatially grounds detection.
+        """
+        if self.bootstrap_frames <= 0 or not self._bootstrap_capture:
+            return
+        prompt_ids = list(self.session.prompts.keys())
+        if len(self._bootstrap_capture) != len(prompt_ids):
+            return  # call mismatch, skip
+        for prompt_id, (pred_logits, pred_boxes, presence_logits) in zip(prompt_ids, self._bootstrap_capture):
+            remaining = self._bootstrap_remaining.get(prompt_id, 0)
+            if remaining <= 0:
+                continue
+            # pred_logits: [1, num_queries] | pred_boxes: [1, num_queries, 4] xyxy [0,1]
+            scores = pred_logits[0].sigmoid()
+            if presence_logits is not None:
+                scores = scores * presence_logits[0].sigmoid()
+            keep = scores > self.bootstrap_min_score
+            n_kept = int(keep.sum().item()) if keep.numel() else 0
+            if n_kept > 0:
+                boxes_xyxy = pred_boxes[0, keep]  # [n_kept, 4]
+                # Convert xyxy → cxcywh (normalized [0,1]).
+                x1, y1, x2, y2 = boxes_xyxy.unbind(-1)
+                cx = (x1 + x2) * 0.5
+                cy = (y1 + y2) * 0.5
+                w = (x2 - x1).clamp(min=1e-6)
+                h = (y2 - y1).clamp(min=1e-6)
+                boxes_cxcywh = torch.stack([cx, cy, w, h], dim=-1)
+                self._exemplar_box_pool.setdefault(prompt_id, []).append(boxes_cxcywh)
+            self._bootstrap_remaining[prompt_id] = remaining - 1
+            prompt_text = self.session.prompts.get(prompt_id, "?")
+            print(
+                f"[SAM3Live] bootstrap prompt={prompt_text!r} (id={prompt_id}): "
+                f"frame_consumed → remaining={remaining - 1} kept_boxes={n_kept}",
+                flush=True,
+            )
+            # If this prompt just finished bootstrap → freeze exemplar boxes.
+            if self._bootstrap_remaining[prompt_id] == 0:
+                pool = self._exemplar_box_pool.get(prompt_id) or []
+                total = sum(t.shape[0] for t in pool)
+                if total == 0:
+                    print(
+                        f"[SAM3Live] bootstrap FAIL for prompt={prompt_text!r}: "
+                        f"no high-conf boxes during bootstrap window. "
+                        f"Keeping pure text-prompt detection.",
+                        flush=True,
+                    )
+                    continue
+                all_boxes = torch.cat(pool, dim=0)  # [total, 4] cxcywh
+                # Cap to a manageable number — empirically cap=3 is the
+                # sweet spot. cap=1 too restrictive (range tighter on area
+                # but misses spatial diversity); cap>=5 starts bleeding the
+                # class concept into adjacent-class edge regions (e.g. floor
+                # bleeding into baseboards/踢脚线 when cap=10 on Steve's
+                # hallway bag). Top-K-by-area keeps the largest exemplar
+                # patches — most representative of the central class region.
+                # Env-var overridable for tuning.
+                import os as _os
+                cap = int(_os.environ.get("SAM3_BOOTSTRAP_BOX_CAP", "3"))
+                if all_boxes.shape[0] > cap:
+                    areas = all_boxes[:, 2] * all_boxes[:, 3]
+                    topk = torch.topk(areas, cap).indices
+                    all_boxes = all_boxes[topk]
+                self._exemplar_boxes[prompt_id] = all_boxes
+                print(
+                    f"[SAM3Live] bootstrap DONE for prompt={prompt_text!r}: "
+                    f"stored {all_boxes.shape[0]} exemplar boxes (cxcywh) "
+                    f"from {total} pooled candidates — box-inject active from next frame",
+                    flush=True,
+                )
+                self._exemplar_box_pool[prompt_id] = []
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def set_prompts(self, prompts: Sequence[str]) -> None:
@@ -260,6 +446,11 @@ class SAM3Live:
         self.processor.add_text_prompt(self.session, list(prompts))
         if self.device.type == "cuda":
             torch.cuda.synchronize()
+        # Init bootstrap counter for any newly-added prompts.
+        if self.bootstrap_frames > 0:
+            for pid in self.session.prompts.keys():
+                self._bootstrap_remaining.setdefault(pid, self.bootstrap_frames)
+                self._exemplar_box_pool.setdefault(pid, [])
 
     def reset_prompts(self, prompts: Sequence[str]) -> None:
         """Drop ALL existing prompts + tracked objects + cache, install new
@@ -276,6 +467,10 @@ class SAM3Live:
         if self.session.processed_frames is not None:
             self.session.processed_frames.clear()
         self._next_frame_idx = 0
+        # Reset bootstrap state — new prompts get a fresh bootstrap cycle.
+        self._bootstrap_remaining.clear()
+        self._exemplar_box_pool.clear()
+        self._exemplar_boxes.clear()
         self.set_prompts(prompts)
         # Force detection on next frame — no tracked objects to propagate.
         self._force_detect_next = True
@@ -283,6 +478,10 @@ class SAM3Live:
     def reset_tracking(self) -> None:
         """Drop tracked-object history but keep prompts. Use when the scene
         has changed enough that re-detection from scratch is desired.
+
+        NOTE: does NOT re-run bootstrap. The exemplar embeddings (if already
+        installed) stay in session.prompt_embeddings. To re-bootstrap, use
+        reset_prompts() with the same prompt list.
         """
         self.session.reset_inference_session()
         if self.session.processed_frames is not None:
@@ -361,12 +560,19 @@ class SAM3Live:
         # Setting streaming=True is implicit when ``frame`` is provided.
         frame_idx_for_this_call = self._next_frame_idx
         self._next_frame_idx += 1
+        # Reset bootstrap state for this frame.
+        if self.bootstrap_frames > 0:
+            self._bootstrap_capture.clear()
+            self._detector_call_counter = 0
         with torch.inference_mode():
             raw_out = self.model(
                 inference_session=self.session,
                 frame=pixel_values,
                 frame_idx=frame_idx_for_this_call,
             )
+        # Consume any captured queries — possibly install exemplar embeddings.
+        if self.bootstrap_frames > 0 and not skip_detection:
+            self._process_bootstrap_capture()
 
         frame_idx = raw_out.frame_idx
 
