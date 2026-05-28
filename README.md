@@ -53,18 +53,21 @@ The accuracy, sharpness, and consistency of the masks is a huge step up from tra
 
 ### Outdoor Terrain
 
-Prompts: `"sidewalk", "grass, trees, or benches"`, whereas the latter is made an illegal cost:
+These demos showcase detecting outdoor drivable ground surfaces (cement, pavement, sidewalk) while avoiding the street, grass and other non-navigable surfaces.
+We segment human-created surfaces using `"sidewalk, cement, or pavement"` in a park & street-side sidewalk environment & label `"grass or plants"` as illegal cost to avoid.
+It does well on sidewalks, blacktop, concrete pavement, and even gravel paths.
 
-TODO video -- precita park + some commentary
 
-Prompts: `"bike lane", "curb, street, plants, or grass"`, whereas the latter prompt is made illegal cost to stay in the bike lane:
+<p align="center">
+  <a href="https://youtu.be/6vNGW-jOVkI"><img src="docs/park.gif" alt="hallway"/></a>
+</p>
 
-TODO video -- bike lane 1x alameda almanc down to humble sea DRONEABLE + some commentary
+TODO video -- bike lane 1x alameda almanc down to humble sea DRONEABLE
 
 ### Indoor Terrain
 
 This demonstration segments the floor simply using `"floor"` in an office environment.
-It does a perfect job, essentially even mapping the freespace of the room without any fine-tuning or even sophisticated prompt engineering. Even for outdoor uses, simply `"sidewalk cement or pavement"` covered all walkable, even if irregular surfaces without an issue.
+It does a perfect job, essentially even mapping the freespace of the room without any fine-tuning or even sophisticated prompt engineering.
 
 <p align="center">
   <a href="https://youtu.be/UQdmIIM90WI"><img src="docs/hallway.gif" alt="hallway"/></a>

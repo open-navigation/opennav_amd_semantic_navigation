@@ -327,9 +327,17 @@ TODO office video
 Outdoor Terrain
 ---------------
 
-These demos showcase detecting outdoor drivable ground surfaces (cement, pavement, sidewalk) while avoiding the street, grass and other non-navigable surfaces
+These demos showcase detecting outdoor drivable ground surfaces (cement, pavement, sidewalk) while avoiding the street, grass and other non-navigable surfaces.
+We segment human-created surfaces using ``"sidewalk, cement, or pavement"`` in a park & street-side sidewalk environment & label ``"grass or plants"`` as illegal cost to avoid.
+It does well on sidewalks, blacktop, concrete pavement, and even gravel paths.
 
-TODO videos (percita + alameda and commentary)
+.. raw:: html
+
+   <p align="center">
+     <iframe width="640" height="360" src="https://www.youtube.com/embed/6vNGW-jOVkI" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+   </p>
+
+TODO alameda
 
 SAM3 does an amazing job with no fine-tuning across a huge variety of terrain types and environments, which is a game-changer for navigation in unstructured environments.
 The accuracy, sharpness, and consistency of the masks is a huge step up from traditional semantic segmentation models, and the text promptability means you can segment out whatever classes are relevant to your application on Day 1!
