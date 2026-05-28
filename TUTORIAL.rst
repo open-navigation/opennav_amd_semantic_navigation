@@ -40,6 +40,14 @@ SAM3 instead takes arbitrary string(s) describing what to segment which can also
 The "class list" is whatever you typed in the launch parameter, and you can change it at runtime via the ``~/change_prompt`` service.
 That is a key property that makes a single model useful across warehouses, sidewalks, farms, and construction sites without retraining possible.
 
+This turns a camera stream into a live, locally-run text/image-based segmentation of the robot's environment that Nav2 can reason about for **terrain-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, **changing situational context**, and handling of **dynamic obstacles**, and much more.
+
+* Make trade-offs in planning and control about navigating via certain surfaces over others. For example, prefer sidewalks over grass (while strictly avoiding street), prefer wide open areas over confined aisles, avoid spills or puddles where possible, etc.
+* Detect small objects on the ground (i.e. cables, debris) or far away objects difficult to pick up on depth cameras or lidars important to an application, in a generalized way without having to know every possible object you may encounter
+* Make decisions about the nature of the situation the robot is currently in to adjust its behavior or algorithms. For example if in confined vs open space, in an area approaching another robot/human/vehicle, or treating particular objects differently. Might be useful in behavior trees ;-) 
+* Find common dynamic objects without training on each specific type to remove from the static scene for dynamic tracking and/or localization improvements.
+* The list goes on! If you can imagine it, it can be integrated into a behavior tree, navigation algorithm, or costmap layer. Doubly so for application-specific tasks.
+
 Running a server-class foundation model at 5-10 Hz on a robot is the other half of the story.
 The AMD Strix Halo (Ryzen AI Max+ 395) pairs an NPU and a Radeon GPU with 32 x86 cores and unified memory in a single package, so SAM3 fits and runs on the edge without an external accelerator.
 That same compute is available for everything else a modern robot might want to run locally (i.e. detectors, VLMs, VLAs, LLMs, planners) without needing another GPU-forwar device.

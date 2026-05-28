@@ -6,7 +6,7 @@
 # Requires opennav_sam3_inference to be importable (pip install -e opennav_sam3_inference/).
 #
 # Usage:
-#   python example/label_images.py --checkpoint models/sam3 --onnx-dir onnx_files_504
+#   python image_testing/label_images.py --checkpoint models/sam3 --onnx-dir onnx_files_504
 
 import argparse
 import os

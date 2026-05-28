@@ -5,8 +5,8 @@
 # Create a GIF from all images in a directory.
 #
 # Usage:
-#   python example/create_gif.py                          # from processed_data/
-#   python example/create_gif.py --input-dir raw_data     # from raw_data/
+#   python image_testing/create_gif.py                          # from processed_data/
+#   python image_testing/create_gif.py --input-dir raw_data     # from raw_data/
 
 import argparse
 from pathlib import Path
