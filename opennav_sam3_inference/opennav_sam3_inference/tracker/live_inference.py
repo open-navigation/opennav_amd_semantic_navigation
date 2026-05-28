@@ -284,19 +284,16 @@ class SAM3Live:
             patch_sam3_video_model_memory_attention(self.model, mem_attn_onnx)
             print(f"  memory_attention MIG ready ({mem_attn_onnx.name})")
 
-        # batched_mask_decoder patch is INCOMPATIBLE with box-prompt path on
-        # MIG (produces empty masks for 4/5 detected obj when input_boxes is
-        # set, see feedback_mig_batched_decoder_bootstrap_bug.md memory).
-        # When bootstrap is enabled (box prompts inject after frame N), skip
-        # the patch — we lose the 2x mask_decoder speedup for N>1 obj but
-        # gain correctness. Override via env-var if needed for testing.
+        # batched_mask_decoder patch — previously had an obj-allocation cascade
+        # bug when combined with bootstrap box-prompt (produced 4/5 empty masks
+        # per frame) because the slow_path always treated propagation frames
+        # as is_init_cond_frame=True. Fixed in batched_mask_decoder.py: the
+        # check is now gated on has_new_inputs to match HF native behavior.
+        # Patch is safe to apply unconditionally.
         import os as _os
         force_skip = _os.environ.get("SAM3_DISABLE_BATCHED_DECODER", "0") == "1"
-        force_apply = _os.environ.get("SAM3_FORCE_BATCHED_PATCH", "0") == "1"
-        auto_skip = self.bootstrap_frames > 0
-        if (auto_skip or force_skip) and not force_apply:
-            why = "bootstrap_frames>0" if auto_skip else "env override"
-            print(f"  batched_mask_decoder patch SKIPPED ({why})")
+        if force_skip:
+            print(f"  batched_mask_decoder patch SKIPPED (env override)")
         else:
             from .batched_mask_decoder import patch_batched_mask_decoder
             patch_batched_mask_decoder(self.model)
