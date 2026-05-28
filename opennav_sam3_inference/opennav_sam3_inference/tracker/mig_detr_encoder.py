@@ -64,7 +64,12 @@ class MIGDetrEncoder(nn.Module):
         self.session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
         elapsed = time.perf_counter() - t0
         prov = self.session.get_providers()[0]
-        print(f"  detr_encoder (ORT MIG EP): ready in {elapsed:.1f}s on {prov}")
+        # Detect the ONNX-compiled prompt seq_len so we can pad runtime
+        # inputs to match. ONNX text_features shape: [1, seq_len, 256].
+        ts_input = next(i for i in self.session.get_inputs() if i.name == "text_features")
+        self.expected_seq_len = int(ts_input.shape[1])
+        print(f"  detr_encoder (ORT MIG EP): ready in {elapsed:.1f}s on {prov} "
+              f"(prompt_seq_len={self.expected_seq_len})")
         # Keep the original encoder around as a fallback / so patched module
         # still passes `isinstance(...) ` checks downstream if any exist.
         self._original = original_encoder
@@ -105,13 +110,45 @@ class MIGDetrEncoder(nn.Module):
                 text_features.shape[0], text_features.shape[1],
                 dtype=torch.bool, device=device,
             )
-        cross_mask = precompute_cross_attn_mask(text_mask, dtype)
+
+        # Pad text_features + text_mask LOCALLY to the ONNX-compiled fixed
+        # seq_len so variable-length prompts (text only, text+box, text+more
+        # box) all run on the same precompiled MIG model. The original
+        # text_features (un-padded) is preserved for the downstream decoder,
+        # which still uses the ORIGINAL text_mask shape — passing padded
+        # tensors downstream would break the PyTorch detr_decoder.
+        orig_text_features = text_features
+        cur_seq_len = text_features.shape[1]
+        target_seq_len = self.expected_seq_len
+        mig_text_features = text_features
+        mig_text_mask = text_mask
+        if cur_seq_len > target_seq_len:
+            if not getattr(self, "_warned_truncate", False):
+                print(f"  [MIGDetrEncoder] WARN: prompt seq {cur_seq_len} > "
+                      f"compiled {target_seq_len}, truncating", flush=True)
+                self._warned_truncate = True
+            mig_text_features = text_features[:, :target_seq_len, :]
+            mig_text_mask = text_mask[:, :target_seq_len]
+        elif cur_seq_len < target_seq_len:
+            pad_len = target_seq_len - cur_seq_len
+            pad_features = torch.zeros(
+                text_features.shape[0], pad_len, text_features.shape[2],
+                dtype=text_features.dtype, device=text_features.device,
+            )
+            mig_text_features = torch.cat([text_features, pad_features], dim=1)
+            pad_mask = torch.zeros(
+                text_mask.shape[0], pad_len,
+                dtype=text_mask.dtype, device=text_mask.device,
+            )
+            mig_text_mask = torch.cat([text_mask, pad_mask], dim=1)
+
+        cross_mask = precompute_cross_attn_mask(mig_text_mask, dtype)
 
         # Run via ORT MIG EP (numpy fp32 in/out)
         out_np = self.session.run(None, {
             "vision_feature":  vision_feature.detach().float().cpu().numpy(),
             "vision_pos":      vision_pos.detach().float().cpu().numpy(),
-            "text_features":   text_features.detach().float().cpu().numpy(),
+            "text_features":   mig_text_features.detach().float().cpu().numpy(),
             "cross_attn_mask": cross_mask.detach().float().cpu().numpy(),
         })
         last_hidden_state = torch.from_numpy(out_np[0]).to(device=device, dtype=dtype)
@@ -124,7 +161,7 @@ class MIGDetrEncoder(nn.Module):
         return Sam3DETREncoderOutput(
             last_hidden_state=last_hidden_state,
             pos_embeds_flattened=pos_flat,
-            text_features=text_features,
+            text_features=orig_text_features,  # un-padded — downstream uses orig mask
             spatial_shapes=spatial_shapes,
         )
 
