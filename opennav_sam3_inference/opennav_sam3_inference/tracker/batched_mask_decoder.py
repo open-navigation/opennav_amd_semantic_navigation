@@ -115,8 +115,20 @@ def patch_batched_mask_decoder(model) -> None:
             # is_init_cond_frame=True → don't update frames_tracked
 
         # ── Slow path: per-obj original (init / new prompts) ─────────────────
-        for obj_idx, _has_new in slow_idxs:
-            is_init_cond_frame = frame_idx not in inference_session.frames_tracked_per_obj[obj_idx]
+        for obj_idx, has_new in slow_idxs:
+            # is_init_cond_frame ONLY when this obj has new inputs AND this
+            # frame_idx hasn't been tracked yet. For propagation-only obj
+            # (has_new=False), is_init_cond_frame stays False so the model
+            # uses its memory bank instead of treating the frame as init.
+            # Matches HF native Sam3TrackerVideoModel.forward (modeling_sam3_video.py:1788-1799).
+            # Previous code computed this unconditionally → on propagation
+            # frames every obj got is_init_cond_frame=True (since frame_idx
+            # isn't tracked yet for any obj) → all 5 obj produced identical
+            # mask_decoder output → 4 ended up as empty mask in postprocessing.
+            if has_new:
+                is_init_cond_frame = frame_idx not in inference_session.frames_tracked_per_obj[obj_idx]
+            else:
+                is_init_cond_frame = False
             if is_init_cond_frame:
                 use_reverse = False
             else:
