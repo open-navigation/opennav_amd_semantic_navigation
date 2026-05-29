@@ -1,6 +1,6 @@
 #!/bin/bash
 
-source opt/ros/jazzy/setup.bash
+set -e
 
 ros2 bag record --max-bag-size 3000000000 -s mcap \
     /ekf/imu/data \
