@@ -324,7 +324,7 @@ global_costmap:
       #     data_type: "LaserScan"
       #     raytrace_max_range: 11.0
       #     raytrace_min_range: 0.0
-      #     obstacle_max_range: 10.0 30  
+      #     obstacle_max_range: 10.0
       #     obstacle_min_range: 0.2
       #   depth_cam:
       #     topic: /sensors/camera_0/points
