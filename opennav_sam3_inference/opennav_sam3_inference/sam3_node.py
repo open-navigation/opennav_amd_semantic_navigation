@@ -115,7 +115,7 @@ class Sam3InferenceNode(Node):
         _boot = int(os.environ.get("SAM3_BOOTSTRAP_FRAMES", "5"))
         _boot_min = float(os.environ.get("SAM3_BOOTSTRAP_MIN_SCORE", "0.3"))
 
-        if os.environ.get("SAM3_USE_HYBRID", "0") == "1":
+        if os.environ.get("SAM3_USE_HYBRID", "1") == "1":
             from opennav_sam3_inference.tracker.hybrid_inference import SAM3HybridLive
             _kfe = int(os.environ.get("SAM3_KEYFRAME_EVERY", "10"))
             self.get_logger().info(
