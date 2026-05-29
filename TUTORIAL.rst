@@ -351,7 +351,9 @@ It does well on sidewalks, blacktop, concrete pavement, and even gravel paths.
      <iframe width="640" height="360" src="https://www.youtube.com/embed/6vNGW-jOVkI" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
    </p>
 
-TODO alameda
+   <p align="center">
+     <iframe width="640" height="360" src="https://www.youtube.com/embed/9JsDWNHVmWg" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+   </p>
 
 SAM3 does an amazing job with no fine-tuning across a huge variety of terrain types and environments, which is a game-changer for navigation in unstructured environments.
 The accuracy, sharpness, and consistency of the masks is a huge step up from traditional semantic segmentation models, and the text promptability means you can segment out whatever classes are relevant to your application on Day 1!

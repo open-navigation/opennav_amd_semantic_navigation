@@ -56,7 +56,9 @@ It does well on sidewalks, blacktop, concrete pavement, and even gravel paths.
   <a href="https://youtu.be/6vNGW-jOVkI"><img src="docs/park.gif" alt="hallway"/></a>
 </p>
 
-TODO video -- bike lane 1x alameda almanc down to humble sea DRONEABLE
+<p align="center">
+  <a href="https://youtu.be/9JsDWNHVmWg"><img src="docs/bike_lane.gif" alt="bike_lane"/></a>
+</p>
 
 ### Indoor Terrain
 
