@@ -3,11 +3,23 @@ sam3_inference:
     checkpoint: /home/administrator/opennav-sam3-inference-models/sam3  # Absolute path to the SAM3 checkpoint
     onnx_dir: /home/administrator/opennav-sam3-inference-models/onnx_files_504  # Absolute path to the directory containing ONNX files
     
-    # prompts: ["sidewalk", "grass"]
+    prompts: ["floor"]
+    class_ids: [1]
+
+    # prompts: ["floor", "wall", "desk", "chair", "shelf and cabinet"]
+    # class_ids: [1, 2, 3, 4, 5]
+
+    # prompts: ["paved cement", "asphalt road", "grass field"]
+    # class_ids: [1, 2, 3]
+
+    # prompts: ["paved cement sidewalk", "grass field"]
     # class_ids: [1, 2]
-    
-    prompts: ["floor", "wall"]
-    class_ids: [1, 2]
+
+    # prompts: ["asphalt lane", "bike lane", "sidewalk", "bushes and plants"]
+    # class_ids: [1, 2, 3, 4]
+
+    # prompts: ["paved cement", "car", "tree"]
+    # class_ids: [1, 2, 3]
     
     device: cuda
     score_threshold: 0.5

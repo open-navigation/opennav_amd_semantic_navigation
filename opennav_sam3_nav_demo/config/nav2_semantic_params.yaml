@@ -156,24 +156,134 @@ local_costmap:
           expected_update_rate: 0.0
           visualize_tile_map: True
           use_cost_selection: True  # If true, select observation per tile using highest max_cost in case multile observations fall in a single tile on one image. If false, use highest confidence
-          max_obstacle_distance: 3.5
+          max_obstacle_distance: 4.0
           min_obstacle_distance: 0.3
           tile_map_decay_time: 1.5
-          class_types: ["traversable", "avoid"]
+
+          class_types: ["traversable"]
           traversable:
             classes: ["floor"]
             base_cost: 15              # Cost when a single observation is received
             max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
             mark_confidence: 0        # Average confidence threshold to apply max_cost
-            samples_to_max_cost: 20    # Number of observations needed to apply max_cost
+            samples_to_max_cost: 100    # Number of observations needed to apply max_cost
             dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
-          avoid:
-            classes: ["wall"]
-            base_cost: 150            # Cost when a single observation is received
-            max_cost: 200             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
-            mark_confidence: 0        # Average confidence threshold to apply max_cost
-            samples_to_max_cost: 20    # Number of observations needed to apply max_cost
-            dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["traversable", "moderate1", "moderate2", "avoid"]
+          # traversable:
+          #   classes: ["floor"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # moderate1:
+          #   classes: ["shelf and cabinet"]
+          #   base_cost: 75            # Cost when a single observation is received
+          #   max_cost: 100             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 50    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # moderate2:
+          #   classes: ["desk", "chair"]
+          #   base_cost: 150            # Cost when a single observation is received
+          #   max_cost: 175             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 50    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["wall"]
+          #   base_cost: 225            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["preferred", "cautious", "avoid"]
+          # preferred:
+          #   classes: ["paved cement"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # cautious:
+          #   classes: ["asphalt road"]
+          #   base_cost: 75            # Cost when a single observation is received
+          #   max_cost: 100             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["grass field"]
+          #   base_cost: 254            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["traversable", "avoid"]
+          # traversable:
+          #   classes: ["paved cement sidewalk"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["grass field"]
+          #   base_cost: 254            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["traversable", "moderate", "avoid"]
+          # traversable:
+          #   classes: ["asphalt lane", "bike lane"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # moderate:
+          #   classes: ["sidewalk"]
+          #   base_cost: 75            # Cost when a single observation is received
+          #   max_cost: 100             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["bushes and plants"]
+          #   base_cost: 254            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["traversable", "moderate", "avoid"]
+          # traversable:
+          #   classes: ["paved cement"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # moderate:
+          #   classes: ["tree"]
+          #   base_cost: 75            # Cost when a single observation is received
+          #   max_cost: 100             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["car"]
+          #   base_cost: 254            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
       always_send_full_costmap: True
 
 global_costmap:
@@ -181,10 +291,10 @@ global_costmap:
     ros__parameters:
       update_frequency: 2.0
       publish_frequency: 1.0
-      width: 40
-      height: 40
-      origin_x: -20.0
-      origin_y: -20.0
+      width: 200
+      height: 200
+      origin_x: -100.0
+      origin_y: -100.0
       global_frame: map
       robot_base_frame: base_link
       footprint: "[ [0.254, 0.2159], [0.254, -0.2159], [-0.254, -0.2159], [-0.254, 0.2159] ]"
@@ -247,24 +357,134 @@ global_costmap:
           expected_update_rate: 0.0
           visualize_tile_map: True
           use_cost_selection: True  # If true, select observation per tile using highest max_cost in case multile observations fall in a single tile on one image. If false, use highest confidence
-          max_obstacle_distance: 3.5
+          max_obstacle_distance: 4.0
           min_obstacle_distance: 0.3
           tile_map_decay_time: 3.0
-          class_types: ["traversable", "avoid"]
+
+          class_types: ["traversable"]
           traversable:
             classes: ["floor"]
             base_cost: 15              # Cost when a single observation is received
             max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
             mark_confidence: 0        # Average confidence threshold to apply max_cost
-            samples_to_max_cost: 20    # Number of observations needed to apply max_cost
+            samples_to_max_cost: 100    # Number of observations needed to apply max_cost
             dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
-          avoid:
-            classes: ["wall"]
-            base_cost: 150            # Cost when a single observation is received
-            max_cost: 200             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
-            mark_confidence: 0        # Average confidence threshold to apply max_cost
-            samples_to_max_cost: 20    # Number of observations needed to apply max_cost
-            dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["traversable", "moderate1", "moderate2", "avoid"]
+          # traversable:
+          #   classes: ["floor"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # moderate1:
+          #   classes: ["shelf and cabinet"]
+          #   base_cost: 75            # Cost when a single observation is received
+          #   max_cost: 100             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 50    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # moderate2:
+          #   classes: ["desk", "chair"]
+          #   base_cost: 150            # Cost when a single observation is received
+          #   max_cost: 175             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 50    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["wall"]
+          #   base_cost: 225            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["preferred", "cautious", "avoid"]
+          # preferred:
+          #   classes: ["paved cement"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # cautious:
+          #   classes: ["asphalt road"]
+          #   base_cost: 75            # Cost when a single observation is received
+          #   max_cost: 100             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["grass field"]
+          #   base_cost: 254            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["traversable", "avoid"]
+          # traversable:
+          #   classes: ["paved cement sidewalk"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["grass field"]
+          #   base_cost: 254            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["traversable", "moderate", "avoid"]
+          # traversable:
+          #   classes: ["asphalt lane", "bike lane"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # moderate:
+          #   classes: ["sidewalk"]
+          #   base_cost: 75            # Cost when a single observation is received
+          #   max_cost: 100             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["bushes and plants"]
+          #   base_cost: 254            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
+          # class_types: ["traversable", "moderate", "avoid"]
+          # traversable:
+          #   classes: ["paved cement"]
+          #   base_cost: 15              # Cost when a single observation is received
+          #   max_cost: 30               # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 100    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # moderate:
+          #   classes: ["tree"]
+          #   base_cost: 75            # Cost when a single observation is received
+          #   max_cost: 100             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+          # avoid:
+          #   classes: ["car"]
+          #   base_cost: 254            # Cost when a single observation is received
+          #   max_cost: 254             # Cost when samples_to_max_cost observations with mark_confidence are accumulated
+          #   mark_confidence: 0        # Average confidence threshold to apply max_cost
+          #   samples_to_max_cost: 75    # Number of observations needed to apply max_cost
+          #   dominant_priority: False  # If true, this class immediately becomes dominant and clears all other class queues from the tile
+
       always_send_full_costmap: True
 
 # map_server:
