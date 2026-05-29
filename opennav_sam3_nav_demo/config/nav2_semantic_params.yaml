@@ -156,7 +156,7 @@ local_costmap:
           expected_update_rate: 0.0
           visualize_tile_map: True
           use_cost_selection: True  # If true, select observation per tile using highest max_cost in case multile observations fall in a single tile on one image. If false, use highest confidence
-          max_obstacle_distance: 3.5
+          max_obstacle_distance: 4.0
           min_obstacle_distance: 0.3
           tile_map_decay_time: 1.5
           class_types: ["traversable", "avoid"]
@@ -247,7 +247,7 @@ global_costmap:
           expected_update_rate: 0.0
           visualize_tile_map: True
           use_cost_selection: True  # If true, select observation per tile using highest max_cost in case multile observations fall in a single tile on one image. If false, use highest confidence
-          max_obstacle_distance: 3.5
+          max_obstacle_distance: 4.0
           min_obstacle_distance: 0.3
           tile_map_decay_time: 3.0
           class_types: ["traversable", "avoid"]
