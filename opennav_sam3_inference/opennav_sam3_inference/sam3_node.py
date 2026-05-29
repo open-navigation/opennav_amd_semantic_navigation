@@ -112,12 +112,15 @@ class Sam3InferenceNode(Node):
             f'(imgsz={imgsz}, onnx_dir={onnx_dir})'
         )
 
+        _boot = int(os.environ.get("SAM3_BOOTSTRAP_FRAMES", "5"))
+        _boot_min = float(os.environ.get("SAM3_BOOTSTRAP_MIN_SCORE", "0.3"))
+
         if os.environ.get("SAM3_USE_HYBRID", "0") == "1":
             from opennav_sam3_inference.tracker.hybrid_inference import SAM3HybridLive
-            _kfe = int(os.environ.get("SAM3_KEYFRAME_EVERY", "5"))
+            _kfe = int(os.environ.get("SAM3_KEYFRAME_EVERY", "10"))
             self.get_logger().info(
                 f'SAM3_USE_HYBRID=1: instantiating SAM3HybridLive '
-                f'(keyframe_every={_kfe})'
+                f'(keyframe_every={_kfe}, bootstrap_frames={_boot})'
             )
             self._live = SAM3HybridLive(
                 checkpoint=checkpoint,
@@ -129,9 +132,14 @@ class Sam3InferenceNode(Node):
                 mig=True,
                 keyframe_every=_kfe,
                 max_objects_per_prompt=max_objects,
+                bootstrap_frames=_boot,
+                bootstrap_min_score=_boot_min,
             )
         else:
             from opennav_sam3_inference.tracker.live_inference import SAM3Live
+            self.get_logger().info(
+                f'instantiating SAM3Live (bootstrap_frames={_boot})'
+            )
             self._live = SAM3Live(
                 checkpoint=checkpoint,
                 prompts=self._prompts,
@@ -142,6 +150,8 @@ class Sam3InferenceNode(Node):
                 mig=True,
                 max_objects_per_prompt=max_objects,
                 redetect_every=1,
+                bootstrap_frames=_boot,
+                bootstrap_min_score=_boot_min,
             )
 
         self._prompt_to_class_id = dict(zip(self._prompts, self._class_ids))
