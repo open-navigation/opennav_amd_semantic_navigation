@@ -181,6 +181,27 @@ class SAM3Live:
         self._detector_call_counter = 0
         self._bootstrap_hook_handle = None
         self._box_inject_hook_handle = None
+        # Drift detection + auto re-bootstrap. After bootstrap completes for
+        # a prompt, we capture a baseline avg-score. Per-frame avg score is
+        # appended to a rolling window; every check_interval we compare the
+        # window mean vs baseline. A drop greater than drop_threshold
+        # triggers re-bootstrap (clears exemplar boxes, restarts the 5-frame
+        # text capture so the system adapts to the new scene). Env-var
+        # tunable; defaults are conservative.
+        import os as _os
+        self._drift_enabled = (
+            _os.environ.get("SAM3_DRIFT_REBOOTSTRAP", "1") == "1"
+            and self.bootstrap_frames > 0
+        )
+        self._drift_window = int(_os.environ.get("SAM3_DRIFT_WINDOW_FRAMES", "30"))
+        self._drift_check_interval = int(_os.environ.get("SAM3_DRIFT_CHECK_INTERVAL", "30"))
+        self._drift_drop_threshold = float(_os.environ.get("SAM3_DRIFT_DROP_THRESHOLD", "0.4"))
+        self._drift_grace_frames = int(_os.environ.get("SAM3_DRIFT_GRACE_FRAMES", "30"))
+        self._drift_baseline_score: dict[int, float] = {}
+        from collections import deque as _deque
+        self._drift_recent_scores: dict[int, "_deque[float]"] = {}
+        self._drift_frames_since_bootstrap: dict[int, int] = {}
+        self._drift_pending_rebootstrap: bool = False
         # Monotonic frame_idx we hand to model.forward. We MUST assign this
         # ourselves rather than letting HF auto-assign, because HF computes
         # the next idx as ``len(processed_frames)`` — which collides with
@@ -436,13 +457,101 @@ class SAM3Live:
                     topk = torch.topk(areas, cap).indices
                     all_boxes = all_boxes[topk]
                 self._exemplar_boxes[prompt_id] = all_boxes
+                # Capture drift-detection baseline: mean of the box-area-pooled
+                # bootstrap scores. We use a proxy of "what's a healthy score
+                # for this prompt in this scene"; rolling per-frame mean is
+                # compared against it later.
+                baseline = (pred_logits[0].sigmoid() *
+                            (presence_logits[0].sigmoid() if presence_logits is not None else 1.0))
+                # Only use baseline from boxes that passed the threshold this frame
+                if keep.any():
+                    baseline_val = float(baseline[keep].mean().item())
+                else:
+                    baseline_val = float(self.bootstrap_min_score)
+                self._drift_baseline_score[prompt_id] = baseline_val
+                from collections import deque as _deque
+                self._drift_recent_scores[prompt_id] = _deque(maxlen=self._drift_window)
+                self._drift_frames_since_bootstrap[prompt_id] = 0
                 print(
                     f"[SAM3Live] bootstrap DONE for prompt={prompt_text!r}: "
                     f"stored {all_boxes.shape[0]} exemplar boxes (cxcywh) "
-                    f"from {total} pooled candidates — box-inject active from next frame",
+                    f"from {total} pooled candidates — box-inject active from next frame "
+                    f"(drift baseline score={baseline_val:.3f})",
                     flush=True,
                 )
                 self._exemplar_box_pool[prompt_id] = []
+
+    # ------------------------------------------------------------------
+    # Drift detection + auto re-bootstrap
+    # ------------------------------------------------------------------
+
+    def _drift_record_and_check(self, result: dict) -> None:
+        """Append per-prompt avg score from this frame, then (every
+        check_interval frames) compare rolling mean vs baseline. If any
+        prompt's mean drops below baseline * (1 - drop_threshold), schedule
+        a re-bootstrap on the next infer().
+        """
+        if not self._drift_enabled or not self._drift_baseline_score:
+            return
+        prompt_to_obj_ids = result.get("prompt_to_obj_ids", {})
+        scores = result.get("scores", {})
+        # Find prompt_id for each prompt text (need to look up via session)
+        text_to_id = {v: k for k, v in self.session.prompts.items()}
+        for prompt_text, oids in prompt_to_obj_ids.items():
+            pid = text_to_id.get(prompt_text)
+            if pid is None or pid not in self._drift_recent_scores:
+                continue
+            self._drift_frames_since_bootstrap[pid] = (
+                self._drift_frames_since_bootstrap.get(pid, 0) + 1
+            )
+            if oids:
+                avg = sum(float(scores.get(o, 0.0)) for o in oids) / len(oids)
+            else:
+                avg = 0.0
+            self._drift_recent_scores[pid].append(avg)
+
+        # Throttled drift check
+        if (self._infer_calls % self._drift_check_interval) != 0:
+            return
+        for pid, baseline in self._drift_baseline_score.items():
+            grace = self._drift_frames_since_bootstrap.get(pid, 0)
+            if grace < self._drift_grace_frames:
+                continue  # not enough post-bootstrap data yet
+            recent = self._drift_recent_scores.get(pid)
+            if recent is None or len(recent) < max(5, self._drift_window // 4):
+                continue
+            current_mean = sum(recent) / len(recent)
+            min_acceptable = baseline * (1.0 - self._drift_drop_threshold)
+            if current_mean < min_acceptable:
+                prompt_text = self.session.prompts.get(pid, "?")
+                pct = (1.0 - current_mean / max(baseline, 1e-6)) * 100
+                print(
+                    f"[SAM3Live] DRIFT detected on prompt={prompt_text!r} "
+                    f"(baseline={baseline:.3f} → rolling mean={current_mean:.3f}, "
+                    f"-{pct:.0f}%). Scheduling re-bootstrap on next infer.",
+                    flush=True,
+                )
+                self._drift_pending_rebootstrap = True
+                return  # one prompt is enough to trigger full re-bootstrap
+
+    def _drift_perform_rebootstrap(self) -> None:
+        """Clear exemplar boxes and reset bootstrap counters so the next
+        bootstrap_frames frames re-capture against the new scene. Tracker
+        state is NOT reset (we want continuity through the re-bootstrap
+        window if possible).
+        """
+        self._exemplar_boxes.clear()
+        self._exemplar_box_pool.clear()
+        self._drift_baseline_score.clear()
+        self._drift_recent_scores.clear()
+        self._drift_frames_since_bootstrap.clear()
+        # Reset per-prompt bootstrap counter to original value
+        for pid in self.session.prompts.keys():
+            self._bootstrap_remaining[pid] = self.bootstrap_frames
+            self._exemplar_box_pool.setdefault(pid, [])
+        self._drift_pending_rebootstrap = False
+        print(f"[SAM3Live] RE-BOOTSTRAP started — next {self.bootstrap_frames} frames "
+              f"use text prompts to capture fresh exemplar boxes", flush=True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -482,6 +591,11 @@ class SAM3Live:
         self._bootstrap_remaining.clear()
         self._exemplar_box_pool.clear()
         self._exemplar_boxes.clear()
+        # Reset drift state too — baseline must be re-learned after re-prompts.
+        self._drift_baseline_score.clear()
+        self._drift_recent_scores.clear()
+        self._drift_frames_since_bootstrap.clear()
+        self._drift_pending_rebootstrap = False
         self.set_prompts(prompts)
         # Force detection on next frame — no tracked objects to propagate.
         self._force_detect_next = True
@@ -575,6 +689,11 @@ class SAM3Live:
         if self.bootstrap_frames > 0:
             self._bootstrap_capture.clear()
             self._detector_call_counter = 0
+            # If drift detection scheduled a re-bootstrap, perform it BEFORE
+            # this frame's detector call so the pre-hook stops injecting old
+            # exemplar boxes and the bootstrap counter restarts capture.
+            if self._drift_pending_rebootstrap:
+                self._drift_perform_rebootstrap()
         with torch.inference_mode():
             raw_out = self.model(
                 inference_session=self.session,
@@ -625,7 +744,7 @@ class SAM3Live:
         if self.keep_recent_frames > 0:
             self._prune_old_frames(keep_last=self.keep_recent_frames)
 
-        return {
+        result = {
             "object_ids": obj_ids,
             "scores": {oid: float(s) for oid, s in zip(obj_ids, scores_list)},
             "masks": {oid: masks_np[i] for i, oid in enumerate(obj_ids)},
@@ -634,6 +753,12 @@ class SAM3Live:
             "frame_idx": frame_idx,
             "detected": not skip_detection,
         }
+        # Drift detection: record this frame's per-prompt avg score, and
+        # throttled-check whether any prompt has dropped enough from its
+        # bootstrap baseline to trigger a re-bootstrap on the next infer.
+        if self._drift_enabled:
+            self._drift_record_and_check(result)
+        return result
 
     # ------------------------------------------------------------------
     # Internals
