@@ -24,7 +24,11 @@ SAM3 is *text-promptable*: you tell it what to find ("person", "pallet", "wet fl
 There is no per-class training step.
 The same model handles indoor floors, outdoor terrain, bike lanes, and arbitrary obstacles, so the costmap can be re-aimed at a new environment by editing a list of strings.
 
-TODO VIDEO HERO FROM README
+.. raw:: html
+
+   <p align="center">
+     <iframe width="640" height="360" src="https://www.youtube.com/embed/a4E9vwTxbZE" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+   </p>
 
 Why SAM3 + Why Strix Halo
 =========================

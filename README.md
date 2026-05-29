@@ -16,10 +16,10 @@ This enables applications to:
 
 This demonstrates state-of-the-art foundation model workflows using AMD's Strix Halo - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with 32 powerful x86 CPU cores to boot. The newest generations of AI-enabled processors are absolutely amazing for robotics (NPU, GPU, FPGA, 32x x86 cores) workloads.
 
-TODO video of the navigation + mask (concise) / drone??? Main hero video
-TODO Video matrix + glamor shot:
-  * SAM3 in the environment mask
-  * Robot navigating terrains and avoiding small or dfficult obstacles using this
+<p align="center">
+  <a href="https://youtu.be/a4E9vwTxbZE"><img src="docs/hero.gif" alt="office"/></a>
+  Click on the gif to see the full video!
+</p>
 
 **⚠️ Need ROS 2, Nav2, or deployment help? Contact [Open Navigation](https://www.opennav.org/)! ⚠️**
 
