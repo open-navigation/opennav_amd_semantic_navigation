@@ -3,7 +3,7 @@
 set -e
 source /opt/ros/jazzy/setup.bash
 
-ros2 bag record --max-bag-size 3000000000 -s mcap \
+ros2 bag record --max-bag-size 3000000000 -s mcap "${@}" \
     /ekf/imu/data \
     /ekf/status \
     /platform/cmd_vel \
