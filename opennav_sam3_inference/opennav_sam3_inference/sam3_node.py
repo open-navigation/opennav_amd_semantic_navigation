@@ -6,6 +6,16 @@ import os
 os.environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("HSA_XNACK", "1")
 
+# Cap CPU thread pools BEFORE any C-extension import. SAM3's inference path
+# is GPU-bound; py-spy shows ~1 dispatcher thread is enough. The PyTorch/
+# OpenCV defaults (== all logical cores) over-subscribe the scheduler and
+# compete with co-resident ROS nodes (nav2_controller_server, costmap_2d).
+# Override via env (OMP_NUM_THREADS=N etc.) if you need more.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import re
 import threading
 
@@ -59,6 +69,14 @@ class Sam3InferenceNode(Node):
         self.declare_parameter('reset_tracking_every_seconds', 30.0)
         self.declare_parameter('queue_depth', 5)
         self.declare_parameter('start_enabled', True)
+        # CPU thread-pool cap for torch + cv2. Default 1: SAM3 inference is
+        # GPU-bound and uses only ~1 dispatcher thread (py-spy verified).
+        # Capping prevents the 32-default pools from competing with co-resident
+        # ROS nodes (nav2_controller_server, costmap_2d) for CPU scheduling
+        # and CCX-local cache. Raise this if profiling shows CPU starvation.
+        # NOTE: OMP/MKL env caps at module top must be raised separately
+        # via env var (OMP_NUM_THREADS=N) — those are import-time locked.
+        self.declare_parameter('cpu_threads', 1)
 
         checkpoint = self.get_parameter('checkpoint').value
         onnx_dir = self.get_parameter('onnx_dir').value
@@ -74,6 +92,18 @@ class Sam3InferenceNode(Node):
             'reset_tracking_every_seconds').value
         queue_depth = self.get_parameter('queue_depth').value
         self._enabled = self.get_parameter('start_enabled').value
+
+        # Apply CPU thread caps from parameter (see declare_parameter above).
+        # Runtime setters are required: torch ignores TORCH_NUM_THREADS env
+        # and cv2 only reads thread count at first parallel call.
+        n_cpu_threads = int(self.get_parameter('cpu_threads').value)
+        torch.set_num_threads(n_cpu_threads)
+        torch.set_num_interop_threads(n_cpu_threads)
+        cv2.setNumThreads(n_cpu_threads)
+        self.get_logger().info(
+            f'CPU thread pools capped: torch={n_cpu_threads} cv2={n_cpu_threads} '
+            f"(env OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS', 'unset')})"
+        )
 
         imgsz = _infer_imgsz(onnx_dir)
 
