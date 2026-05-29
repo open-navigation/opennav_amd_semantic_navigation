@@ -92,6 +92,8 @@ class SAM3HybridLive:
         iou_assoc_threshold: float = 0.3,
         # SAM3Live passthrough
         max_vision_features_cache_size: int = 1,
+        bootstrap_frames: int = 0,
+        bootstrap_min_score: float = 0.3,
     ):
         """Args:
             keyframe_every: SAM3 detection every Nth frame. K=1 degenerates to
@@ -103,6 +105,13 @@ class SAM3HybridLive:
             max_objects_per_prompt: forwarded to the underlying SAM3Live for
                 its own per-prompt cap. The hybrid then mirrors the cap on the
                 tracker pool.
+            bootstrap_frames: forwarded to the underlying SAM3Live keyframe
+                detector. When > 0, the first N keyframes use text prompts
+                normally and capture high-confidence boxes; subsequent
+                keyframes inject those boxes as input_boxes (see SAM3Live
+                docstring for the full text-bootstrap → box-prompt flow).
+                Default 0 = pure text-prompt keyframes (original behavior).
+            bootstrap_min_score: passthrough to underlying SAM3Live.
         """
         self.imgsz = imgsz
         self.onnx_dir = Path(onnx_dir)
@@ -123,8 +132,11 @@ class SAM3HybridLive:
             redetect_every=1,
             max_objects_per_prompt=max_objects_per_prompt,
             max_vision_features_cache_size=max_vision_features_cache_size,
+            bootstrap_frames=bootstrap_frames,
+            bootstrap_min_score=bootstrap_min_score,
         )
-        print(f"[SAM3HybridLive] SAM3Live ready in {time.perf_counter()-t:.1f}s")
+        print(f"[SAM3HybridLive] SAM3Live ready in {time.perf_counter()-t:.1f}s "
+              f"(bootstrap_frames={bootstrap_frames})")
 
         # 2) Shared tracker modules (backbone + dec_init + dec_prop + mem_enc + mem_attn)
         t = time.perf_counter()
