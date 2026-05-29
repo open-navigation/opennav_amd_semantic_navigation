@@ -22,10 +22,9 @@ from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     GroupAction,
-    IncludeLaunchDescription,
     SetEnvironmentVariable,
 )
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+
 from launch.substitutions import LaunchConfiguration
 
 from launch_ros.actions import LoadComposableNodes, Node
@@ -35,9 +34,6 @@ from nav2_common.launch import RewrittenYaml
 def generate_launch_description():
     # Get the launch directory
     opennav_sam3_nav_dir = get_package_share_directory('opennav_sam3_nav_demo')
-    opennav_sam3_launch_dir = os.path.join(opennav_sam3_nav_dir, 'launch')
-    bringup_dir = get_package_share_directory('nav2_bringup')
-    bt_navigator_dir = get_package_share_directory('nav2_bt_navigator')
     bt_navigator_dir = get_package_share_directory('nav2_bt_navigator')
 
     # Create the launch configuration variables
