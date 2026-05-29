@@ -18,6 +18,7 @@ This demonstrates state-of-the-art foundation model workflows using AMD's Strix 
 
 <p align="center">
   <a href="https://youtu.be/a4E9vwTxbZE"><img src="docs/hero.gif" alt="office"/></a>
+
   Click on the gif to see the full video!
 </p>
 
