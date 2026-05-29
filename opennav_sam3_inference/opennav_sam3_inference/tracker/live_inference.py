@@ -202,6 +202,16 @@ class SAM3Live:
         self._drift_recent_scores: dict[int, "_deque[float]"] = {}
         self._drift_frames_since_bootstrap: dict[int, int] = {}
         self._drift_pending_rebootstrap: bool = False
+        # Optional periodic re-bootstrap. Independent of the condition-based
+        # drift detection above (both can be enabled simultaneously — OR
+        # logic). Useful as a safety net in environments where you want to
+        # force fresh exemplars on a fixed schedule regardless of score
+        # signal (e.g., long-running deployments, slow gradual drift that
+        # never trips the score threshold). Default 0 = off.
+        self._periodic_rebootstrap_seconds = float(
+            _os.environ.get("SAM3_PERIODIC_REBOOTSTRAP_SECONDS", "0")
+        )
+        self._last_bootstrap_complete_time: float = 0.0
         # Monotonic frame_idx we hand to model.forward. We MUST assign this
         # ourselves rather than letting HF auto-assign, because HF computes
         # the next idx as ``len(processed_frames)`` — which collides with
@@ -472,6 +482,10 @@ class SAM3Live:
                 from collections import deque as _deque
                 self._drift_recent_scores[prompt_id] = _deque(maxlen=self._drift_window)
                 self._drift_frames_since_bootstrap[prompt_id] = 0
+                # Record wall-clock time for the periodic re-bootstrap timer.
+                # (Last completion wins if multiple prompts finish at same frame.)
+                import time as _time
+                self._last_bootstrap_complete_time = _time.perf_counter()
                 print(
                     f"[SAM3Live] bootstrap DONE for prompt={prompt_text!r}: "
                     f"stored {all_boxes.shape[0]} exemplar boxes (cxcywh) "
@@ -534,6 +548,29 @@ class SAM3Live:
                 self._drift_pending_rebootstrap = True
                 return  # one prompt is enough to trigger full re-bootstrap
 
+    def _check_periodic_rebootstrap(self) -> None:
+        """If SAM3_PERIODIC_REBOOTSTRAP_SECONDS > 0 and elapsed wall-clock
+        time since last bootstrap completion exceeds it, schedule a
+        re-bootstrap. Independent of (additive to) drift detection.
+        """
+        if self._periodic_rebootstrap_seconds <= 0:
+            return
+        if self._last_bootstrap_complete_time <= 0:
+            return  # never bootstrapped yet
+        if self._drift_pending_rebootstrap:
+            return  # already scheduled
+        import time as _time
+        elapsed = _time.perf_counter() - self._last_bootstrap_complete_time
+        if elapsed >= self._periodic_rebootstrap_seconds:
+            print(
+                f"[SAM3Live] f={self._infer_calls} PERIODIC re-bootstrap "
+                f"({elapsed:.1f}s since last bootstrap, "
+                f"threshold {self._periodic_rebootstrap_seconds:.0f}s). "
+                f"Scheduling re-bootstrap on next infer.",
+                flush=True,
+            )
+            self._drift_pending_rebootstrap = True
+
     def _drift_perform_rebootstrap(self) -> None:
         """Clear exemplar boxes and reset bootstrap counters so the next
         bootstrap_frames frames re-capture against the new scene. Tracker
@@ -550,6 +587,9 @@ class SAM3Live:
             self._bootstrap_remaining[pid] = self.bootstrap_frames
             self._exemplar_box_pool.setdefault(pid, [])
         self._drift_pending_rebootstrap = False
+        # Restart the periodic timer (will be set anew when next bootstrap
+        # completes via _process_bootstrap_capture).
+        self._last_bootstrap_complete_time = 0.0
         print(f"[SAM3Live] f={self._infer_calls} RE-BOOTSTRAP started — next "
               f"{self.bootstrap_frames} frames use text prompts to capture fresh "
               f"exemplar boxes", flush=True)
@@ -597,6 +637,7 @@ class SAM3Live:
         self._drift_recent_scores.clear()
         self._drift_frames_since_bootstrap.clear()
         self._drift_pending_rebootstrap = False
+        self._last_bootstrap_complete_time = 0.0
         self.set_prompts(prompts)
         # Force detection on next frame — no tracked objects to propagate.
         self._force_detect_next = True
@@ -759,6 +800,10 @@ class SAM3Live:
         # bootstrap baseline to trigger a re-bootstrap on the next infer.
         if self._drift_enabled:
             self._drift_record_and_check(result)
+        # Periodic re-bootstrap timer (independent of drift; user-opt-in
+        # safety net via SAM3_PERIODIC_REBOOTSTRAP_SECONDS).
+        if self.bootstrap_frames > 0:
+            self._check_periodic_rebootstrap()
         return result
 
     # ------------------------------------------------------------------
