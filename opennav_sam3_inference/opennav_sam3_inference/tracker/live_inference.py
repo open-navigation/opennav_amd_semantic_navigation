@@ -526,7 +526,7 @@ class SAM3Live:
                 prompt_text = self.session.prompts.get(pid, "?")
                 pct = (1.0 - current_mean / max(baseline, 1e-6)) * 100
                 print(
-                    f"[SAM3Live] DRIFT detected on prompt={prompt_text!r} "
+                    f"[SAM3Live] f={self._infer_calls} DRIFT detected on prompt={prompt_text!r} "
                     f"(baseline={baseline:.3f} → rolling mean={current_mean:.3f}, "
                     f"-{pct:.0f}%). Scheduling re-bootstrap on next infer.",
                     flush=True,
@@ -550,8 +550,9 @@ class SAM3Live:
             self._bootstrap_remaining[pid] = self.bootstrap_frames
             self._exemplar_box_pool.setdefault(pid, [])
         self._drift_pending_rebootstrap = False
-        print(f"[SAM3Live] RE-BOOTSTRAP started — next {self.bootstrap_frames} frames "
-              f"use text prompts to capture fresh exemplar boxes", flush=True)
+        print(f"[SAM3Live] f={self._infer_calls} RE-BOOTSTRAP started — next "
+              f"{self.bootstrap_frames} frames use text prompts to capture fresh "
+              f"exemplar boxes", flush=True)
 
     # ------------------------------------------------------------------
     # Public API
