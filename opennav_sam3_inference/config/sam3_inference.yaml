@@ -1,7 +1,7 @@
 sam3_inference:
   ros__parameters:
-    checkpoint: /home/administrator/opennav-sam3-inference-models/sam3  # Absolute path to the SAM3 checkpoint
-    onnx_dir: /home/administrator/opennav-sam3-inference-models/onnx_files_504  # Absolute path to the directory containing ONNX files
+    # checkpoint: /home/administrator/opennav-sam3-inference-model/sam3  # Absolute path to the SAM3 checkpoint, overrides environment variable
+    # onnx_dir: /home/administrator/opennav-sam3-inference-model/onnx_files_504  # Absolute path to the directory containing ONNX files, overrides environment variable
     
     prompts: ["floor"]
     class_ids: [1]
