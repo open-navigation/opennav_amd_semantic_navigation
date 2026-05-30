@@ -164,39 +164,21 @@ If you have not already, you must create a hugging face account and do the follo
 * Accept license at https://huggingface.co/facebook/sam3
 * Get token from https://huggingface.co/settings/tokens 
 
-#### Install Dependencies and Setup Model
-
-Setup a recent version of `conda` / `miniforge`. Check out ([miniforge repo](https://github.com/conda-forge/miniforge)) for installation steps. Then, run the `setup.sh` script to set up the Python, ROCm, and other important dependencies, including model weights:
-
-```bash
-cd <workspace>/src/opennav_amd_samantic_sam3_navigation/opennav_sam3_inference/
-./setup.sh
-```
-
-Without any modifiers, the script will install ROCm, migraphx, setup Python dependencies in `opennav-sam3-inference` conda environment, and downloads the model weights to `/mode/sam3/` folder in the same directory used to run the script.
-
-Note: The setup script provides two options to either obtain SAM3 weights from the official repository or from a community mirror, either of them works fine.
-
-Then the build model artifacts for a specific resolution/pipeline which takes a few minutes
-
-```bash
-conda activate opennav-sam3-inference
-
-# Text-prompt (~18 min @504px)
-python export/build.py --pipeline text --imgsz 504
-
-# Both resolutions (~45 min total)
-python export/build.py --pipeline text --imgsz 504 1008
-```
-
-You should see the output files in `onnx_files_*` folder. At this point, move the model and onnx files to a directory on your computer to persist and use for inference.
-
 #### Build and Run Node
 
-Configure the node parameters in `sam3_inference.yaml` to ensure absolute paths to model weights and build artifacts are correctly set. Feel free to adjust other parameters as well following the parameters table above.
+Refer to the [README](opennav_sam3_setup/README.md) inside `opennav_sam3_setup` for instructions on setting up the environment before the following steps.
 
+See the node parameters in `sam3_inference.yaml` to configure the classes and detection parameters for SAM3.
 
-Build this package in the conda environment used for the setup script to use the correct environment.
+##### First time build
+
+Build the `opennav_sam3_msgs` package first since the following packages depends on it.
+
+```bash
+colcon build --packages-select opennav_sam3_msgs && source install/setup.bash
+```
+
+Then build just the `opennav_sam3_inference` package inside the conda environment created by the setup script. By default it's `opennav-sam3-inference`.
 
 ```bash
 conda activate opennav-sam3-inference
@@ -204,11 +186,30 @@ colcon build --packages-select opennav_sam3_inference
 conda deactivate
 ```
 
-Now you can source the workspace as usual and launch the inference node, even outside of the conda environment!
+Outside the conda environemnt, build everything else as usual while skipping just the `opennav_sam3_inference` package
 
 ```bash
-ros2 launch opennav_sam3_inference sam3_inference.launch.py image_topic:=/my_camera/image_raw
+colcon build --packages-skip opennav_sam3_inference
 ```
+
+Now you can source the workspace as usual and launch the inference node, even outside of the conda environment!
+
+##### Rebuilding packages
+
+- Always build the inference package `opennav_sam3_inference` inside the conda environment.
+- Build everything else outside the conda environment excluding the inference package.
+- When in question, just delete the inference package folder from `build` and `install` spaces and rebuild inside the conda environment.
+
+##### Run the inference stack
+
+```bash
+ros2 launch opennav_sam3_inference sam3_inference.launch.py
+```
+
+>If the camera color image and pointcloud are already aligned from the sensor, please add `sensor_processing_pipeline:=false` to 
+>the above command to avoid overhead from redundant processing.
+
+>Inference node uses images from `/sensors/camera_0/color/image` topic by default.
 
 ## Related Projects
 
