@@ -77,7 +77,7 @@ def generate_launch_description():
             namespace=namespace,
             output='screen',
             emulate_tty=True,
-            parameters=[params_file, {'use_sim_time', use_sim_time}],
+            parameters=[params_file, {'use_sim_time': use_sim_time}],
             remappings=[
                 ('~/image', image_topic),
             ],  
