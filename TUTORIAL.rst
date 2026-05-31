@@ -230,7 +230,7 @@ Once built, source the workspace.
 Within a few seconds you should see the three topics published.
 It useful to visualize the segmentation mask topic to visualize the detection overlay to see it working!
 
-TODO detection overlay gif
+TODO use bike_lane_camera.gif here
 
 How that we have that working, we can focus on the costmap integration to use this information.
 
