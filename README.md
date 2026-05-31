@@ -2,6 +2,12 @@
 
 This repository hosts a demonstration of using generalized semantic segmentation for autonomous navigation with [Nav2](https://docs.nav2.org/), running on the edge on a [AMD Strix Halo](https://www.amd.com/en/blogs/2025/amd-ryzen-ai-max-personal-ai-supercomputing-guide.html) using Meta's [SAM3](https://ai.meta.com/sam3) foundation model for text-prompted semantic segmentation. It turns a camera stream into a live, locally-run text/image-based segmentation of the robot's environment that Nav2 can reason about for **terrain-aware navigation**, detection of **small or otherwise hard-to-see obstacles**, **changing situational context**, and handling of **dynamic obstacles**, and much more.
 
+<p align="center">
+  <a href="https://youtu.be/a4E9vwTxbZE"><img src="docs/hero.gif" alt="office"/></a>
+
+  Click on the gif to see the full video!
+</p>
+
 This enables applications to:
 
   * Make trade-offs in planning and control about navigating via certain surfaces over others. For example, prefer sidewalks over grass (while strictly avoiding street), prefer wide open areas over confined aisles, avoid spills or puddles where possible, etc.
@@ -15,11 +21,6 @@ This enables applications to:
   * The list goes on! If you can imagine it, it can be integrated into a behavior tree, navigation algorithm, or costmap layer. Doubly so for application-specific tasks.
 
 This demonstrates state-of-the-art foundation model workflows using AMD's Strix Halo - which is also capable to perform workloads on the edge like Detection, Segmentation, VLMs, VLAs, LLMs, and more with 32 powerful x86 CPU cores to boot. The newest generations of AI-enabled processors are absolutely amazing for robotics (NPU, GPU, FPGA, 32x x86 cores) workloads.
-
-TODO video of the navigation + mask (concise) / drone??? Main hero video
-TODO Video matrix + glamor shot:
-  * SAM3 in the environment mask
-  * Robot navigating terrains and avoiding small or dfficult obstacles using this
 
 **⚠️ Need ROS 2, Nav2, or deployment help? Contact [Open Navigation](https://www.opennav.org/)! ⚠️**
 
