@@ -94,6 +94,7 @@ class SAM3HybridLive:
         max_vision_features_cache_size: int = 1,
         bootstrap_frames: int = 0,
         bootstrap_min_score: float = 0.3,
+        periodic_rebootstrap_seconds: float | None = None,
     ):
         """Args:
             keyframe_every_ms: Wall-clock interval between SAM3 keyframe detections
@@ -137,6 +138,7 @@ class SAM3HybridLive:
             max_vision_features_cache_size=max_vision_features_cache_size,
             bootstrap_frames=bootstrap_frames,
             bootstrap_min_score=bootstrap_min_score,
+            periodic_rebootstrap_seconds=periodic_rebootstrap_seconds,
         )
         print(f"[SAM3HybridLive] SAM3Live ready in {time.perf_counter()-t:.1f}s "
               f"(bootstrap_frames={bootstrap_frames})")

@@ -87,6 +87,10 @@ class Sam3InferenceNode(Node):
         # to capture high-confidence exemplar boxes. 0 disables bootstrap.
         self.declare_parameter('bootstrap_frames', 5)
         self.declare_parameter('bootstrap_min_score', 0.3)
+        # Wall-clock interval between automatic re-bootstrap cycles.
+        # Catches scene changes (indoor → outdoor, etc.) the score-only drift
+        # detection can miss. Set to 0 to disable.
+        self.declare_parameter('periodic_rebootstrap_seconds', 15.0)
 
         checkpoint = self.get_parameter('checkpoint').value
         onnx_dir = self.get_parameter('onnx_dir').value
@@ -126,6 +130,7 @@ class Sam3InferenceNode(Node):
         _kfe_ms = float(self.get_parameter('keyframe_every_ms').value)
         _boot = int(self.get_parameter('bootstrap_frames').value)
         _boot_min = float(self.get_parameter('bootstrap_min_score').value)
+        _periodic = float(self.get_parameter('periodic_rebootstrap_seconds').value)
 
         if _use_hybrid:
             from opennav_sam3_inference.tracker.hybrid_inference import SAM3HybridLive
@@ -145,6 +150,7 @@ class Sam3InferenceNode(Node):
                 max_objects_per_prompt=max_objects,
                 bootstrap_frames=_boot,
                 bootstrap_min_score=_boot_min,
+                periodic_rebootstrap_seconds=_periodic,
             )
         else:
             from opennav_sam3_inference.tracker.live_inference import SAM3Live
@@ -164,6 +170,7 @@ class Sam3InferenceNode(Node):
                 redetect_every=1,
                 bootstrap_frames=_boot,
                 bootstrap_min_score=_boot_min,
+                periodic_rebootstrap_seconds=_periodic,
             )
 
         self._prompt_to_class_id = dict(zip(self._prompts, self._class_ids))

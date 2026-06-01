@@ -40,3 +40,7 @@ sam3_inference:
     # Set bootstrap_frames: 0 to disable (pre-#17 pure text-prompt behaviour).
     bootstrap_frames: 5
     bootstrap_min_score: 0.3
+
+    # Force re-bootstrap every N seconds wall-clock (catches scene changes
+    # the score-only drift signal cannot detect). 0 to disable.
+    periodic_rebootstrap_seconds: 15.0
