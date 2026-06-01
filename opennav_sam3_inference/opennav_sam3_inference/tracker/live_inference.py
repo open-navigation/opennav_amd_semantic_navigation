@@ -191,7 +191,7 @@ class SAM3Live:
         # tunable; defaults are conservative.
         import os as _os
         self._drift_enabled = (
-            _os.environ.get("SAM3_DRIFT_REBOOTSTRAP", "1") == "1"
+            _os.environ.get("SAM3_DRIFT_REBOOTSTRAP", "0") == "1"
             and self.bootstrap_frames > 0
         )
         self._drift_window = int(_os.environ.get("SAM3_DRIFT_WINDOW_FRAMES", "30"))
