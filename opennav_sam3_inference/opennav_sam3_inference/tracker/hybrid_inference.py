@@ -87,7 +87,7 @@ class SAM3HybridLive:
         dtype: torch.dtype = torch.float16,
         device: str | torch.device | None = None,
         mig: bool = True,
-        keyframe_every: int = 5,
+        keyframe_every_ms: float = 1000.0,
         max_objects_per_prompt: int | dict[str, int] | None = 5,
         iou_assoc_threshold: float = 0.3,
         # SAM3Live passthrough
@@ -96,8 +96,11 @@ class SAM3HybridLive:
         bootstrap_min_score: float = 0.3,
     ):
         """Args:
-            keyframe_every: SAM3 detection every Nth frame. K=1 degenerates to
-                pure SAM3Live (no benefit). K=5 is a good default.
+            keyframe_every_ms: Wall-clock interval between SAM3 keyframe detections
+                (milliseconds). Decoupled from camera frame rate — use a value that
+                reflects how fast the scene changes for your robot (e.g. 1000 ms for
+                indoor navigation at walking speed). 0 < keyframe_every_ms.
+                The first frame is always a keyframe.
             iou_assoc_threshold: mask-IoU floor for re-using an existing obj_id
                 when a new SAM3 detection matches an existing tracker. Below
                 this, the detection spawns a new obj_id and the unmatched
@@ -115,7 +118,7 @@ class SAM3HybridLive:
         """
         self.imgsz = imgsz
         self.onnx_dir = Path(onnx_dir)
-        self.K = max(1, int(keyframe_every))
+        self.keyframe_interval_s = max(0.001, float(keyframe_every_ms) / 1000.0)
         self.iou_thresh = float(iou_assoc_threshold)
         self.max_per_prompt = max_objects_per_prompt
 
@@ -157,7 +160,9 @@ class SAM3HybridLive:
         self._next_obj_id = 0
         self._force_keyframe_next = True  # f=0 + after any reset
         self._last_was_keyframe = False
-        print(f"[SAM3HybridLive] ready. keyframe_every={self.K} iou_thresh={self.iou_thresh}")
+        self._last_keyframe_time: float = 0.0  # 0 → first frame always keyframe
+        print(f"[SAM3HybridLive] ready. keyframe_every_ms={keyframe_every_ms:.0f} "
+              f"iou_thresh={self.iou_thresh}")
 
     # ------------------------------------------------------------------
     # Public API (matches SAM3Live)
@@ -182,7 +187,11 @@ class SAM3HybridLive:
             raise ValueError(f"expected HxWx3 BGR, got shape {frame_bgr.shape}")
         H, W = frame_bgr.shape[:2]
 
-        is_keyframe = self._force_keyframe_next or (self._call_count % self.K == 0)
+        _now = time.perf_counter()
+        is_keyframe = (
+            self._force_keyframe_next
+            or (_now - self._last_keyframe_time) >= self.keyframe_interval_s
+        )
         self._force_keyframe_next = False
 
         # Tracker backbone input (preprocessed to imgsz). Cheap; ~1ms.
@@ -193,6 +202,8 @@ class SAM3HybridLive:
         else:
             result = self._propagation_infer(img_np, H, W)
 
+        if is_keyframe:
+            self._last_keyframe_time = time.perf_counter()
         self._last_was_keyframe = is_keyframe
         result["keyframe"] = is_keyframe
         result["frame_idx"] = self._call_count

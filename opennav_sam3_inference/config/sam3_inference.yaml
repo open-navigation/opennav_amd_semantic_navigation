@@ -29,3 +29,14 @@ sam3_inference:
     queue_depth: 5
     start_enabled: true
     cpu_threads: 1  # cap torch/cv2 thread pools (see sam3_node.py); raise if CPU profiling shows starvation
+
+    # Hybrid pipeline (SAM3 detect every keyframe_every_ms, SAM2-tracker propagates between).
+    # Set use_hybrid: false for unconditional per-frame detection (~1.6 fps multi-prompt).
+    use_hybrid: true
+    keyframe_every_ms: 1000.0  # wall-clock interval; decoupled from camera frame rate
+
+    # Text-bootstrap → box-prompt: first N keyframes capture exemplar boxes from text detections;
+    # subsequent keyframes inject them as box prompts for stable multi-prompt tracking.
+    # Set bootstrap_frames: 0 to disable (pre-#17 pure text-prompt behaviour).
+    bootstrap_frames: 5
+    bootstrap_min_score: 0.3

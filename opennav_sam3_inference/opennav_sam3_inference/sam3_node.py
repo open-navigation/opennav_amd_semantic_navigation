@@ -77,6 +77,16 @@ class Sam3InferenceNode(Node):
         # NOTE: OMP/MKL env caps at module top must be raised separately
         # via env var (OMP_NUM_THREADS=N) — those are import-time locked.
         self.declare_parameter('cpu_threads', 1)
+        # Hybrid pipeline (SAM3 detector every keyframe_every_ms, SAM2-style
+        # tracker propagation between keyframes). Set False for per-frame detection.
+        self.declare_parameter('use_hybrid', True)
+        # Wall-clock interval between SAM3 keyframe detections (ms).
+        # Decoupled from camera frame rate — tune to how fast the scene changes.
+        self.declare_parameter('keyframe_every_ms', 1000.0)
+        # Text-bootstrap → box-prompt: number of initial text-mode frames used
+        # to capture high-confidence exemplar boxes. 0 disables bootstrap.
+        self.declare_parameter('bootstrap_frames', 5)
+        self.declare_parameter('bootstrap_min_score', 0.3)
 
         checkpoint = self.get_parameter('checkpoint').value
         onnx_dir = self.get_parameter('onnx_dir').value
@@ -112,15 +122,16 @@ class Sam3InferenceNode(Node):
             f'(imgsz={imgsz}, onnx_dir={onnx_dir})'
         )
 
-        _boot = int(os.environ.get("SAM3_BOOTSTRAP_FRAMES", "5"))
-        _boot_min = float(os.environ.get("SAM3_BOOTSTRAP_MIN_SCORE", "0.3"))
+        _use_hybrid = bool(self.get_parameter('use_hybrid').value)
+        _kfe_ms = float(self.get_parameter('keyframe_every_ms').value)
+        _boot = int(self.get_parameter('bootstrap_frames').value)
+        _boot_min = float(self.get_parameter('bootstrap_min_score').value)
 
-        if os.environ.get("SAM3_USE_HYBRID", "1") == "1":
+        if _use_hybrid:
             from opennav_sam3_inference.tracker.hybrid_inference import SAM3HybridLive
-            _kfe = int(os.environ.get("SAM3_KEYFRAME_EVERY", "10"))
             self.get_logger().info(
-                f'SAM3_USE_HYBRID=1: instantiating SAM3HybridLive '
-                f'(keyframe_every={_kfe}, bootstrap_frames={_boot})'
+                f'use_hybrid=True: instantiating SAM3HybridLive '
+                f'(keyframe_every_ms={_kfe_ms:.0f}, bootstrap_frames={_boot})'
             )
             self._live = SAM3HybridLive(
                 checkpoint=checkpoint,
@@ -130,7 +141,7 @@ class Sam3InferenceNode(Node):
                 dtype=torch.float16,
                 device=device,
                 mig=True,
-                keyframe_every=_kfe,
+                keyframe_every_ms=_kfe_ms,
                 max_objects_per_prompt=max_objects,
                 bootstrap_frames=_boot,
                 bootstrap_min_score=_boot_min,
@@ -138,7 +149,8 @@ class Sam3InferenceNode(Node):
         else:
             from opennav_sam3_inference.tracker.live_inference import SAM3Live
             self.get_logger().info(
-                f'instantiating SAM3Live (bootstrap_frames={_boot})'
+                f'use_hybrid=False: instantiating SAM3Live '
+                f'(bootstrap_frames={_boot})'
             )
             self._live = SAM3Live(
                 checkpoint=checkpoint,
