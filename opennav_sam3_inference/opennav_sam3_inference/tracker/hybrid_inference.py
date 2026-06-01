@@ -10,8 +10,8 @@ Why:
   fine for many frames from a single box prompt (12.21 FPS @504 on DAVIS).
 
 How:
-  ``SAM3HybridLive`` runs SAM3 detection every ``keyframe_every`` frames to
-  refresh per-prompt detections, then runs SAM2 trackers on the K-1 frames
+  ``SAM3HybridLive`` runs SAM3 detection every ``keyframe_every_ms`` milliseconds to
+  refresh per-prompt detections, then runs SAM2 trackers on intermediate frames
   in between. At each keyframe we re-associate new SAM3 detections to
   existing trackers by mask IoU to preserve obj_id continuity.
 
