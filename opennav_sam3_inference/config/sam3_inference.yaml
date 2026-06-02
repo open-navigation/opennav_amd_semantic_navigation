@@ -43,4 +43,4 @@ sam3_inference:
 
     # Force re-bootstrap every N seconds wall-clock (catches scene changes
     # the score-only drift signal cannot detect). 0 to disable.
-    periodic_rebootstrap_seconds: 15.0
+    periodic_rebootstrap_seconds: 180.0

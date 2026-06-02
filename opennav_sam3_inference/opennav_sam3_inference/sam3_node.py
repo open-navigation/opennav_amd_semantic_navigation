@@ -90,7 +90,7 @@ class Sam3InferenceNode(Node):
         # Wall-clock interval between automatic re-bootstrap cycles.
         # Catches scene changes (indoor → outdoor, etc.) the score-only drift
         # detection can miss. Set to 0 to disable.
-        self.declare_parameter('periodic_rebootstrap_seconds', 15.0)
+        self.declare_parameter('periodic_rebootstrap_seconds', 180.0)
 
         checkpoint = self.get_parameter('checkpoint').value
         onnx_dir = self.get_parameter('onnx_dir').value

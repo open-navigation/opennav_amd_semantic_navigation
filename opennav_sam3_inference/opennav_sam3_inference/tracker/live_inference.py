@@ -191,7 +191,7 @@ class SAM3Live:
         # tunable; defaults are conservative.
         import os as _os
         self._drift_enabled = (
-            _os.environ.get("SAM3_DRIFT_REBOOTSTRAP", "0") == "1"
+            _os.environ.get("SAM3_DRIFT_REBOOTSTRAP", "1") == "1"
             and self.bootstrap_frames > 0
         )
         self._drift_window = int(_os.environ.get("SAM3_DRIFT_WINDOW_FRAMES", "30"))
@@ -215,7 +215,7 @@ class SAM3Live:
             self._periodic_rebootstrap_seconds = float(periodic_rebootstrap_seconds)
         else:
             self._periodic_rebootstrap_seconds = float(
-                _os.environ.get("SAM3_PERIODIC_REBOOTSTRAP_SECONDS", "15")
+                _os.environ.get("SAM3_PERIODIC_REBOOTSTRAP_SECONDS", "180")
             )
         self._last_bootstrap_complete_time: float = 0.0
         # Monotonic frame_idx we hand to model.forward. We MUST assign this
