@@ -87,6 +87,9 @@ class SAM3Live:
         keep_recent_frames: int = 0,
         redetect_every: int = 1,
         max_objects_per_prompt: int | dict[str, int] | None = 5,
+        bootstrap_frames: int = 0,
+        bootstrap_min_score: float = 0.3,
+        periodic_rebootstrap_seconds: float | None = None,
     ):
         """
         Args:
@@ -130,6 +133,19 @@ class SAM3Live:
                   prompts not listed are uncapped
                 - ``None``: unlimited — only safe when you know the scene's
                   true object count is small (e.g. single tracked target).
+            bootstrap_frames: PoC switch — if > 0, run text prompts on the
+                first N frames AS USUAL to anchor the concept, then auto-extract
+                visual exemplar embeddings from the high-confidence decoder
+                queries on those frames and swap them into the cached
+                ``session.prompt_embeddings[prompt_id]`` so frame N+ runs
+                detection against site-specific visual signatures instead of
+                CLIP text. The customer API (text prompts in yaml) is unchanged.
+                Default 0 = disabled (pure text mode, original behavior).
+            bootstrap_min_score: per-query confidence floor (sigmoid of
+                pred_logits * presence) for a query to be collected into the
+                bootstrap pool. Default 0.3 — somewhat permissive to collect
+                more samples in the few frames available; tighten if exemplar
+                quality is bad.
         """
         # Lazy import so that consumers of this module don't pay model import cost
         # if they only want the class definition.
@@ -146,6 +162,62 @@ class SAM3Live:
         self._force_detect_next = True
         # Monotonic count of calls to infer() — drives the redetect schedule.
         self._infer_calls = 0
+        # Bootstrap-to-exemplar PoC state (see bootstrap_frames docstring).
+        # Approach (Path C - box prompts): during bootstrap collect high-conf
+        # pred_boxes per prompt; after bootstrap, inject them as input_boxes
+        # on every subsequent detector call. Boxes are stored in
+        # CxCyWH normalized [0,1] format (matches Sam3GeometryEncoder input).
+        self.bootstrap_frames = max(0, int(bootstrap_frames))
+        self.bootstrap_min_score = float(bootstrap_min_score)
+        self._bootstrap_remaining: dict[int, int] = {}
+        # During bootstrap: per-prompt accumulator of high-conf pred_boxes.
+        # After bootstrap done: per-prompt stored exemplar boxes (tensor).
+        self._exemplar_box_pool: dict[int, list[torch.Tensor]] = {}
+        self._exemplar_boxes: dict[int, torch.Tensor] = {}  # [num_boxes, 4] cxcywh [0,1]
+        # Forward-hook capture for the current infer() call. List of
+        # (pred_logits, pred_boxes, presence_logits) per detector call.
+        self._bootstrap_capture: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]] = []
+        # Per-infer counter of detector_model calls — used by the box-inject
+        # pre-hook to figure out which prompt is being processed.
+        self._detector_call_counter = 0
+        self._bootstrap_hook_handle = None
+        self._box_inject_hook_handle = None
+        # Drift detection + auto re-bootstrap. After bootstrap completes for
+        # a prompt, we capture a baseline avg-score. Per-frame avg score is
+        # appended to a rolling window; every check_interval we compare the
+        # window mean vs baseline. A drop greater than drop_threshold
+        # triggers re-bootstrap (clears exemplar boxes, restarts the 5-frame
+        # text capture so the system adapts to the new scene). Env-var
+        # tunable; defaults are conservative.
+        import os as _os
+        self._drift_enabled = (
+            _os.environ.get("SAM3_DRIFT_REBOOTSTRAP", "1") == "1"
+            and self.bootstrap_frames > 0
+        )
+        self._drift_window = int(_os.environ.get("SAM3_DRIFT_WINDOW_FRAMES", "30"))
+        self._drift_check_interval = int(_os.environ.get("SAM3_DRIFT_CHECK_INTERVAL", "30"))
+        self._drift_drop_threshold = float(_os.environ.get("SAM3_DRIFT_DROP_THRESHOLD", "0.4"))
+        self._drift_grace_frames = int(_os.environ.get("SAM3_DRIFT_GRACE_FRAMES", "30"))
+        self._drift_baseline_score: dict[int, float] = {}
+        from collections import deque as _deque
+        self._drift_recent_scores: dict[int, "_deque[float]"] = {}
+        self._drift_frames_since_bootstrap: dict[int, int] = {}
+        self._drift_pending_rebootstrap: bool = False
+        # Optional periodic re-bootstrap. Independent of the condition-based
+        # drift detection above (both can be enabled simultaneously — OR
+        # logic). Catches scene changes (e.g. indoor → outdoor) that the
+        # score-only drift signal cannot detect — when exemplars find visually
+        # similar surfaces in the new scene, scores stay high even though the
+        # semantic content has changed.
+        # Precedence: constructor kwarg > env var > default 180s. Shorter cadence
+        # (e.g. 15s) caused visible mask quality degradation. Set to 0 to disable.
+        if periodic_rebootstrap_seconds is not None:
+            self._periodic_rebootstrap_seconds = float(periodic_rebootstrap_seconds)
+        else:
+            self._periodic_rebootstrap_seconds = float(
+                _os.environ.get("SAM3_PERIODIC_REBOOTSTRAP_SECONDS", "180")
+            )
+        self._last_bootstrap_complete_time: float = 0.0
         # Monotonic frame_idx we hand to model.forward. We MUST assign this
         # ourselves rather than letting HF auto-assign, because HF computes
         # the next idx as ``len(processed_frames)`` — which collides with
@@ -199,9 +271,15 @@ class SAM3Live:
             max_vision_features_cache_size=max_vision_features_cache_size,
         )
 
+        # Bootstrap hook on detector_model — captures decoder_hidden_states
+        # + pred_logits per detector call. No-op if bootstrap_frames=0.
+        if self.bootstrap_frames > 0:
+            self._install_bootstrap_hook()
+
         # Add initial prompts (deduped + encoded by the processor).
         self.set_prompts(prompts)
-        print(f"[SAM3Live] ready. prompts={list(self.session.prompts.values())}")
+        print(f"[SAM3Live] ready. prompts={list(self.session.prompts.values())} "
+              f"bootstrap_frames={self.bootstrap_frames}")
 
     # ------------------------------------------------------------------
     # MIG patch wiring (mirrors demo_text.py)
@@ -243,9 +321,284 @@ class SAM3Live:
             patch_sam3_video_model_memory_attention(self.model, mem_attn_onnx)
             print(f"  memory_attention MIG ready ({mem_attn_onnx.name})")
 
-        from .batched_mask_decoder import patch_batched_mask_decoder
-        patch_batched_mask_decoder(self.model)
-        print(f"  batched_mask_decoder patch applied (active for N>1 obj)")
+        # batched_mask_decoder patch — previously had an obj-allocation cascade
+        # bug when combined with bootstrap box-prompt (produced 4/5 empty masks
+        # per frame) because the slow_path always treated propagation frames
+        # as is_init_cond_frame=True. Fixed in batched_mask_decoder.py: the
+        # check is now gated on has_new_inputs to match HF native behavior.
+        # Patch is safe to apply unconditionally.
+        import os as _os
+        force_skip = _os.environ.get("SAM3_DISABLE_BATCHED_DECODER", "0") == "1"
+        if force_skip:
+            print(f"  batched_mask_decoder patch SKIPPED (env override)")
+        else:
+            from .batched_mask_decoder import patch_batched_mask_decoder
+            patch_batched_mask_decoder(self.model)
+            print(f"  batched_mask_decoder patch applied (active for N>1 obj)")
+
+    # ------------------------------------------------------------------
+    # Bootstrap-to-exemplar PoC plumbing
+    # ------------------------------------------------------------------
+    def _install_bootstrap_hook(self) -> None:
+        """Install two hooks on ``detector_model``:
+
+        1. **Forward hook** (capture) — collects ``pred_logits``, ``pred_boxes``,
+           ``presence_logits`` from each detector call. Used during bootstrap
+           to extract high-confidence boxes per prompt.
+        2. **Forward pre-hook** (inject) — once bootstrap is complete for a
+           prompt, injects that prompt's stored exemplar boxes as
+           ``input_boxes`` into the detector forward kwargs. Per-call
+           prompt attribution uses ``self._detector_call_counter`` which is
+           reset to 0 at the start of each infer().
+        """
+        detector = self.model.detector_model
+
+        def detector_hook(module, args, kwargs, output):
+            try:
+                pred_logits = getattr(output, "pred_logits", None)
+                pred_boxes = getattr(output, "pred_boxes", None)
+                presence_logits = getattr(output, "presence_logits", None)
+                if pred_logits is None or pred_boxes is None:
+                    if not getattr(self, "_bootstrap_hook_warned", False):
+                        attrs = [a for a in dir(output) if not a.startswith("_")]
+                        print(f"[SAM3Live] bootstrap hook: pred_logits={pred_logits is not None} "
+                              f"pred_boxes={pred_boxes is not None}. Attrs: {attrs[:20]}",
+                              flush=True)
+                        self._bootstrap_hook_warned = True
+                    return
+                self._bootstrap_capture.append(
+                    (pred_logits.detach(), pred_boxes.detach(),
+                     presence_logits.detach() if presence_logits is not None else None)
+                )
+            except Exception as e:
+                print(f"[SAM3Live] bootstrap hook exception: {e}", flush=True)
+
+        def box_inject_pre_hook(module, args, kwargs):
+            # Look up which prompt is currently being processed via call counter.
+            prompt_ids = list(self.session.prompts.keys())
+            idx = self._detector_call_counter
+            self._detector_call_counter += 1
+            if idx >= len(prompt_ids):
+                return  # call out of expected range — skip injection
+            pid = prompt_ids[idx]
+            boxes = self._exemplar_boxes.get(pid)
+            if boxes is None:
+                return  # bootstrap not yet done for this prompt
+            if kwargs.get("input_boxes") is not None:
+                return  # caller already supplied boxes — don't override
+            num_boxes = boxes.shape[0]
+            # Inject:
+            #   input_boxes:        [1, num_boxes, 4]  (cxcywh [0,1])
+            #   input_boxes_labels: [1, num_boxes]     (1 = positive)
+            kwargs["input_boxes"] = boxes.to(
+                dtype=self.dtype, device=self.device,
+            ).unsqueeze(0)
+            kwargs["input_boxes_labels"] = torch.ones(
+                1, num_boxes, dtype=torch.long, device=self.device,
+            )
+            return args, kwargs
+
+        self._bootstrap_hook_handle = detector.register_forward_hook(detector_hook, with_kwargs=True)
+        self._box_inject_hook_handle = detector.register_forward_pre_hook(
+            box_inject_pre_hook, with_kwargs=True,
+        )
+        print(f"[SAM3Live] bootstrap hooks installed (capture + box-inject)")
+
+    def _process_bootstrap_capture(self) -> None:
+        """Consume ``self._bootstrap_capture`` from the just-completed infer
+        call. Collects high-confidence pred_boxes per prompt; when a prompt
+        has used its full bootstrap budget, stores the representative box
+        set in ``self._exemplar_boxes[prompt_id]``. From the next infer onward,
+        the box-inject pre-hook automatically passes those boxes as
+        ``input_boxes`` on the per-prompt detector call so SAM3's geometry
+        encoder spatially grounds detection.
+        """
+        if self.bootstrap_frames <= 0 or not self._bootstrap_capture:
+            return
+        prompt_ids = list(self.session.prompts.keys())
+        if len(self._bootstrap_capture) != len(prompt_ids):
+            return  # call mismatch, skip
+        for prompt_id, (pred_logits, pred_boxes, presence_logits) in zip(prompt_ids, self._bootstrap_capture):
+            remaining = self._bootstrap_remaining.get(prompt_id, 0)
+            if remaining <= 0:
+                continue
+            # pred_logits: [1, num_queries] | pred_boxes: [1, num_queries, 4] xyxy [0,1]
+            scores = pred_logits[0].sigmoid()
+            if presence_logits is not None:
+                scores = scores * presence_logits[0].sigmoid()
+            keep = scores > self.bootstrap_min_score
+            n_kept = int(keep.sum().item()) if keep.numel() else 0
+            if n_kept > 0:
+                boxes_xyxy = pred_boxes[0, keep]  # [n_kept, 4]
+                # Convert xyxy → cxcywh (normalized [0,1]).
+                x1, y1, x2, y2 = boxes_xyxy.unbind(-1)
+                cx = (x1 + x2) * 0.5
+                cy = (y1 + y2) * 0.5
+                w = (x2 - x1).clamp(min=1e-6)
+                h = (y2 - y1).clamp(min=1e-6)
+                boxes_cxcywh = torch.stack([cx, cy, w, h], dim=-1)
+                self._exemplar_box_pool.setdefault(prompt_id, []).append(boxes_cxcywh)
+            self._bootstrap_remaining[prompt_id] = remaining - 1
+            prompt_text = self.session.prompts.get(prompt_id, "?")
+            print(
+                f"[SAM3Live] bootstrap prompt={prompt_text!r} (id={prompt_id}): "
+                f"frame_consumed → remaining={remaining - 1} kept_boxes={n_kept}",
+                flush=True,
+            )
+            # If this prompt just finished bootstrap → freeze exemplar boxes.
+            if self._bootstrap_remaining[prompt_id] == 0:
+                pool = self._exemplar_box_pool.get(prompt_id) or []
+                total = sum(t.shape[0] for t in pool)
+                if total == 0:
+                    print(
+                        f"[SAM3Live] bootstrap FAIL for prompt={prompt_text!r}: "
+                        f"no high-conf boxes during bootstrap window. "
+                        f"Keeping pure text-prompt detection.",
+                        flush=True,
+                    )
+                    continue
+                all_boxes = torch.cat(pool, dim=0)  # [total, 4] cxcywh
+                # Cap to a manageable number — empirically cap=3 is the
+                # sweet spot. cap=1 too restrictive (range tighter on area
+                # but misses spatial diversity); cap>=5 starts bleeding the
+                # class concept into adjacent-class edge regions (e.g. floor
+                # bleeding into baseboards/踢脚线 when cap=10 on Steve's
+                # hallway bag). Top-K-by-area keeps the largest exemplar
+                # patches — most representative of the central class region.
+                # Env-var overridable for tuning.
+                import os as _os
+                cap = int(_os.environ.get("SAM3_BOOTSTRAP_BOX_CAP", "3"))
+                if all_boxes.shape[0] > cap:
+                    areas = all_boxes[:, 2] * all_boxes[:, 3]
+                    topk = torch.topk(areas, cap).indices
+                    all_boxes = all_boxes[topk]
+                self._exemplar_boxes[prompt_id] = all_boxes
+                # Capture drift-detection baseline: mean of the box-area-pooled
+                # bootstrap scores. We use a proxy of "what's a healthy score
+                # for this prompt in this scene"; rolling per-frame mean is
+                # compared against it later.
+                baseline = (pred_logits[0].sigmoid() *
+                            (presence_logits[0].sigmoid() if presence_logits is not None else 1.0))
+                # Only use baseline from boxes that passed the threshold this frame
+                if keep.any():
+                    baseline_val = float(baseline[keep].mean().item())
+                else:
+                    baseline_val = float(self.bootstrap_min_score)
+                self._drift_baseline_score[prompt_id] = baseline_val
+                from collections import deque as _deque
+                self._drift_recent_scores[prompt_id] = _deque(maxlen=self._drift_window)
+                self._drift_frames_since_bootstrap[prompt_id] = 0
+                # Record wall-clock time for the periodic re-bootstrap timer.
+                # (Last completion wins if multiple prompts finish at same frame.)
+                import time as _time
+                self._last_bootstrap_complete_time = _time.perf_counter()
+                print(
+                    f"[SAM3Live] bootstrap DONE for prompt={prompt_text!r}: "
+                    f"stored {all_boxes.shape[0]} exemplar boxes (cxcywh) "
+                    f"from {total} pooled candidates — box-inject active from next frame "
+                    f"(drift baseline score={baseline_val:.3f})",
+                    flush=True,
+                )
+                self._exemplar_box_pool[prompt_id] = []
+
+    # ------------------------------------------------------------------
+    # Drift detection + auto re-bootstrap
+    # ------------------------------------------------------------------
+
+    def _drift_record_and_check(self, result: dict) -> None:
+        """Append per-prompt avg score from this frame, then (every
+        check_interval frames) compare rolling mean vs baseline. If any
+        prompt's mean drops below baseline * (1 - drop_threshold), schedule
+        a re-bootstrap on the next infer().
+        """
+        if not self._drift_enabled or not self._drift_baseline_score:
+            return
+        prompt_to_obj_ids = result.get("prompt_to_obj_ids", {})
+        scores = result.get("scores", {})
+        # Find prompt_id for each prompt text (need to look up via session)
+        text_to_id = {v: k for k, v in self.session.prompts.items()}
+        for prompt_text, oids in prompt_to_obj_ids.items():
+            pid = text_to_id.get(prompt_text)
+            if pid is None or pid not in self._drift_recent_scores:
+                continue
+            self._drift_frames_since_bootstrap[pid] = (
+                self._drift_frames_since_bootstrap.get(pid, 0) + 1
+            )
+            if oids:
+                avg = sum(float(scores.get(o, 0.0)) for o in oids) / len(oids)
+            else:
+                avg = 0.0
+            self._drift_recent_scores[pid].append(avg)
+
+        # Throttled drift check
+        if (self._infer_calls % self._drift_check_interval) != 0:
+            return
+        for pid, baseline in self._drift_baseline_score.items():
+            grace = self._drift_frames_since_bootstrap.get(pid, 0)
+            if grace < self._drift_grace_frames:
+                continue  # not enough post-bootstrap data yet
+            recent = self._drift_recent_scores.get(pid)
+            if recent is None or len(recent) < max(5, self._drift_window // 4):
+                continue
+            current_mean = sum(recent) / len(recent)
+            min_acceptable = baseline * (1.0 - self._drift_drop_threshold)
+            if current_mean < min_acceptable:
+                prompt_text = self.session.prompts.get(pid, "?")
+                pct = (1.0 - current_mean / max(baseline, 1e-6)) * 100
+                print(
+                    f"[SAM3Live] f={self._infer_calls} DRIFT detected on prompt={prompt_text!r} "
+                    f"(baseline={baseline:.3f} → rolling mean={current_mean:.3f}, "
+                    f"-{pct:.0f}%). Scheduling re-bootstrap on next infer.",
+                    flush=True,
+                )
+                self._drift_pending_rebootstrap = True
+                return  # one prompt is enough to trigger full re-bootstrap
+
+    def _check_periodic_rebootstrap(self) -> None:
+        """If SAM3_PERIODIC_REBOOTSTRAP_SECONDS > 0 and elapsed wall-clock
+        time since last bootstrap completion exceeds it, schedule a
+        re-bootstrap. Independent of (additive to) drift detection.
+        """
+        if self._periodic_rebootstrap_seconds <= 0:
+            return
+        if self._last_bootstrap_complete_time <= 0:
+            return  # never bootstrapped yet
+        if self._drift_pending_rebootstrap:
+            return  # already scheduled
+        import time as _time
+        elapsed = _time.perf_counter() - self._last_bootstrap_complete_time
+        if elapsed >= self._periodic_rebootstrap_seconds:
+            print(
+                f"[SAM3Live] f={self._infer_calls} PERIODIC re-bootstrap "
+                f"({elapsed:.1f}s since last bootstrap, "
+                f"threshold {self._periodic_rebootstrap_seconds:.0f}s). "
+                f"Scheduling re-bootstrap on next infer.",
+                flush=True,
+            )
+            self._drift_pending_rebootstrap = True
+
+    def _drift_perform_rebootstrap(self) -> None:
+        """Clear exemplar boxes and reset bootstrap counters so the next
+        bootstrap_frames frames re-capture against the new scene. Tracker
+        state is NOT reset (we want continuity through the re-bootstrap
+        window if possible).
+        """
+        self._exemplar_boxes.clear()
+        self._exemplar_box_pool.clear()
+        self._drift_baseline_score.clear()
+        self._drift_recent_scores.clear()
+        self._drift_frames_since_bootstrap.clear()
+        # Reset per-prompt bootstrap counter to original value
+        for pid in self.session.prompts.keys():
+            self._bootstrap_remaining[pid] = self.bootstrap_frames
+            self._exemplar_box_pool.setdefault(pid, [])
+        self._drift_pending_rebootstrap = False
+        # Restart the periodic timer (will be set anew when next bootstrap
+        # completes via _process_bootstrap_capture).
+        self._last_bootstrap_complete_time = 0.0
+        print(f"[SAM3Live] f={self._infer_calls} RE-BOOTSTRAP started — next "
+              f"{self.bootstrap_frames} frames use text prompts to capture fresh "
+              f"exemplar boxes", flush=True)
 
     # ------------------------------------------------------------------
     # Public API
@@ -260,6 +613,11 @@ class SAM3Live:
         self.processor.add_text_prompt(self.session, list(prompts))
         if self.device.type == "cuda":
             torch.cuda.synchronize()
+        # Init bootstrap counter for any newly-added prompts.
+        if self.bootstrap_frames > 0:
+            for pid in self.session.prompts.keys():
+                self._bootstrap_remaining.setdefault(pid, self.bootstrap_frames)
+                self._exemplar_box_pool.setdefault(pid, [])
 
     def reset_prompts(self, prompts: Sequence[str]) -> None:
         """Drop ALL existing prompts + tracked objects + cache, install new
@@ -276,6 +634,16 @@ class SAM3Live:
         if self.session.processed_frames is not None:
             self.session.processed_frames.clear()
         self._next_frame_idx = 0
+        # Reset bootstrap state — new prompts get a fresh bootstrap cycle.
+        self._bootstrap_remaining.clear()
+        self._exemplar_box_pool.clear()
+        self._exemplar_boxes.clear()
+        # Reset drift state too — baseline must be re-learned after re-prompts.
+        self._drift_baseline_score.clear()
+        self._drift_recent_scores.clear()
+        self._drift_frames_since_bootstrap.clear()
+        self._drift_pending_rebootstrap = False
+        self._last_bootstrap_complete_time = 0.0
         self.set_prompts(prompts)
         # Force detection on next frame — no tracked objects to propagate.
         self._force_detect_next = True
@@ -283,6 +651,10 @@ class SAM3Live:
     def reset_tracking(self) -> None:
         """Drop tracked-object history but keep prompts. Use when the scene
         has changed enough that re-detection from scratch is desired.
+
+        NOTE: does NOT re-run bootstrap. The exemplar embeddings (if already
+        installed) stay in session.prompt_embeddings. To re-bootstrap, use
+        reset_prompts() with the same prompt list.
         """
         self.session.reset_inference_session()
         if self.session.processed_frames is not None:
@@ -361,12 +733,24 @@ class SAM3Live:
         # Setting streaming=True is implicit when ``frame`` is provided.
         frame_idx_for_this_call = self._next_frame_idx
         self._next_frame_idx += 1
+        # Reset bootstrap state for this frame.
+        if self.bootstrap_frames > 0:
+            self._bootstrap_capture.clear()
+            self._detector_call_counter = 0
+            # If drift detection scheduled a re-bootstrap, perform it BEFORE
+            # this frame's detector call so the pre-hook stops injecting old
+            # exemplar boxes and the bootstrap counter restarts capture.
+            if self._drift_pending_rebootstrap:
+                self._drift_perform_rebootstrap()
         with torch.inference_mode():
             raw_out = self.model(
                 inference_session=self.session,
                 frame=pixel_values,
                 frame_idx=frame_idx_for_this_call,
             )
+        # Consume any captured queries — possibly install exemplar embeddings.
+        if self.bootstrap_frames > 0 and not skip_detection:
+            self._process_bootstrap_capture()
 
         frame_idx = raw_out.frame_idx
 
@@ -408,7 +792,7 @@ class SAM3Live:
         if self.keep_recent_frames > 0:
             self._prune_old_frames(keep_last=self.keep_recent_frames)
 
-        return {
+        result = {
             "object_ids": obj_ids,
             "scores": {oid: float(s) for oid, s in zip(obj_ids, scores_list)},
             "masks": {oid: masks_np[i] for i, oid in enumerate(obj_ids)},
@@ -417,6 +801,16 @@ class SAM3Live:
             "frame_idx": frame_idx,
             "detected": not skip_detection,
         }
+        # Drift detection: record this frame's per-prompt avg score, and
+        # throttled-check whether any prompt has dropped enough from its
+        # bootstrap baseline to trigger a re-bootstrap on the next infer.
+        if self._drift_enabled:
+            self._drift_record_and_check(result)
+        # Periodic re-bootstrap timer (independent of drift; user-opt-in
+        # safety net via SAM3_PERIODIC_REBOOTSTRAP_SECONDS).
+        if self.bootstrap_frames > 0:
+            self._check_periodic_rebootstrap()
+        return result
 
     # ------------------------------------------------------------------
     # Internals

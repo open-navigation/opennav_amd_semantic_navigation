@@ -153,7 +153,10 @@ The following parameters are also provided:
 | `queue_depth` | `int` | `5` | History depth for the `~/segmentation` and `~/label_mask` publishers. The `~/image` subscription uses a fixed `depth=2`, `BEST_EFFORT` profile so stale frames are dropped — real-time perception wants latest-frame-wins. |
 | `start_enabled` | `bool` | `true` | If `false`, the node loads and compiles the model but returns early from the image callback until `~/enable` is called with `data: true`. |
 | `max_objects_per_prompt` | `int` | `5` | Cap on simultaneously tracked objects per prompt. Excess (lowest score) are evicted via session.remove_object so the tracker stops propagating them. |
-| `redetect_every` | `int` | `1` | Does the full SAM3 detection after the given number of frames to ensure new objects/people are detected over time. All the intermediate frames does tracker propagation on just the previous detections |
+| `redetect_interval_ms` | `double` | `1000.0` | Wall-clock interval between full SAM3 detections. `0` runs SAM3 on every frame (most accurate, slowest); `>0` runs SAM3 on keyframes every N ms with tracker propagation in between (recommended for multi-prompt). |
+| `bootstrap_frames` | `int` | `5` | Text-bootstrap → box-prompt: number of initial text-mode keyframes used to capture exemplar boxes, which are then injected as box prompts for stable multi-prompt tracking. `0` disables (pure text-prompt). |
+| `bootstrap_min_score` | `double` | `0.3` | Minimum detection score for a box to be captured as a bootstrap exemplar. |
+| `periodic_rebootstrap_seconds` | `double` | `180.0` | Force a re-bootstrap every N seconds wall-clock to catch scene changes the score-only drift signal cannot detect. `0` disables. |
 
 We want to especially thank Harry Sun at AMD for doing an incredible job with the SAM3 tracker implementation in collaboration with this work.
 

@@ -316,6 +316,71 @@ class MemoryBank:
 # Tracker
 # ---------------------------------------------------------------------------
 
+class SharedTrackerResources:
+    """Heavy-weight tracker resources loaded ONCE, shared across many
+    SAM3OnnxTracker instances.
+
+    Use case: hybrid pipeline runs N per-object trackers per frame; each one
+    needs its own MemoryBank but they can share backbone + ORT modules.
+
+    Pass an instance to ``SAM3OnnxTracker(shared=resources)`` to skip the
+    heavy module loading and just allocate per-object state.
+    """
+
+    def __init__(
+        self,
+        onnx_dir: str | Path,
+        imgsz: int = 504,
+        num_maskmem: int = 7,
+        backbone: str = "auto",
+    ):
+        # Build a temporary SAM3OnnxTracker (with checkpoint=None — backbone="auto"
+        # will go through MIGraphX since onnx_files_504/backbone_tracker/tuned.mxr
+        # exists). Then steal its module references.
+        owner = SAM3OnnxTracker(
+            checkpoint=None,
+            onnx_dir=onnx_dir,
+            imgsz=imgsz,
+            num_maskmem=num_maskmem,
+            backbone=backbone,
+        )
+        # Shared (read-only from per-tracker POV) refs
+        self.imgsz            = owner.imgsz
+        self.H                = owner.H
+        self.W                = owner.W
+        self.HW               = owner.HW
+        self.mask_mem_size    = owner.mask_mem_size
+        self.num_maskmem      = num_maskmem
+        self._mxr_backbone    = owner._mxr_backbone
+        self.vision_encoder   = owner.vision_encoder
+        self.device           = owner.device
+        self.dec_init         = owner.dec_init
+        self.dec_prop         = owner.dec_prop
+        self.mem_enc          = owner.mem_enc
+        self.mem_attn         = owner.mem_attn
+        self._mem_attn_slots  = owner._mem_attn_slots
+        # temporal_pe came from the owner's memory_bank
+        self._temporal_pe     = owner.memory_bank.temporal_pe
+
+    def run_backbone(self, img_np):
+        """Shared backbone call: (1, 3, H, W) float32 → (fpn_0, fpn_1, fpn_2, pos_2)."""
+        if self._mxr_backbone is not None:
+            return self._mxr_backbone(img_np)
+        import torch
+        pv = torch.from_numpy(img_np).to(self.device).half()
+        with torch.inference_mode():
+            vis = self.vision_encoder(pv, return_dict=True)
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
+        return (
+            vis.fpn_hidden_states[0].float().cpu().numpy(),
+            vis.fpn_hidden_states[1].float().cpu().numpy(),
+            vis.fpn_hidden_states[2].float().cpu().numpy(),
+            (vis.fpn_position_encoding[2].float().cpu().numpy()
+             if vis.fpn_position_encoding is not None else None),
+        )
+
+
 class SAM3OnnxTracker:
     """
     SAM3 mask-level video tracker using ONNX tracking modules.
@@ -337,7 +402,32 @@ class SAM3OnnxTracker:
         imgsz: int = 504,
         num_maskmem: int = 7,
         backbone: str = "auto",
+        shared: "SharedTrackerResources | None" = None,
     ):
+        # Shared-resources fast path: skip all heavy module loads, just copy
+        # refs + allocate own MemoryBank. Used by the hybrid pipeline.
+        if shared is not None:
+            self.imgsz            = shared.imgsz
+            self.H                = shared.H
+            self.W                = shared.W
+            self.HW               = shared.HW
+            self.num_maskmem      = num_maskmem
+            self.mask_mem_size    = shared.mask_mem_size
+            self._mxr_backbone    = shared._mxr_backbone
+            self.vision_encoder   = shared.vision_encoder
+            self.device           = shared.device
+            self.dec_init         = shared.dec_init
+            self.dec_prop         = shared.dec_prop
+            self.mem_enc          = shared.mem_enc
+            self.mem_attn         = shared.mem_attn
+            self._mem_attn_slots  = shared._mem_attn_slots
+            self.memory_bank      = MemoryBank(shared._temporal_pe, max_slots=num_maskmem)
+            self._frame_idx       = 0
+            self._timings: dict[str, list] = {
+                k: [] for k in ["backbone", "mem_attn", "dec_init", "dec_prop", "mem_enc", "total"]
+            }
+            return
+
         import onnxruntime as ort
 
         self.imgsz         = imgsz
@@ -616,6 +706,94 @@ class SAM3OnnxTracker:
         # pos_2 is the 4th backbone output; only usable as positional encoding
         # if its spatial size matches fpn_2 (self.HW). At 1008px the tracker
         # backbone ONNX has 4 FPN levels where fpn_3 (36x36) != fpn_2 (72x72).
+        pos_2_valid = (pos_2 is not None and pos_2.size == 256 * self.HW)
+        cur_pos  = (pos_2.reshape(1, 256, self.HW).transpose(2, 0, 1)
+                    if pos_2_valid else np.zeros_like(cur_feat))
+
+        memory, memory_pos = self.memory_bank.build_attention_inputs(
+            fixed_slots=self._mem_attn_slots)
+        if memory is None:
+            cond = fpn_2
+        else:
+            t0 = time.perf_counter()
+            cond = self.mem_attn.run(None, {
+                "current_vision_features": cur_feat,
+                "memory":                  memory,
+                "current_vis_pos_embed":   cur_pos,
+                "memory_pos_embed":        memory_pos,
+            })[0]
+            self._timings["mem_attn"].append(time.perf_counter() - t0)
+
+        t0 = time.perf_counter()
+        masks, _, score = self.dec_prop.run(None, {
+            "fpn_2_cond": cond, "fpn_0": fpn_0, "fpn_1": fpn_1,
+        })
+        self._timings["dec_prop"].append(time.perf_counter() - t0)
+
+        binary_mask = masks.squeeze() > 0
+        self._encode_memory(fpn_2, masks[0])
+        self._timings["total"].append(time.perf_counter() - t_total)
+        self._frame_idx += 1
+        return binary_mask, float(score.flat[0])
+
+    # ------------------------------------------------------------------
+    # Shared-backbone API (hybrid pipeline)
+    # ------------------------------------------------------------------
+
+    def run_backbone(self, img_np: np.ndarray):
+        """Public alias of the internal backbone call.
+
+        Returns: (fpn_0, fpn_1, fpn_2, pos_2). pos_2 may be None when the
+        loaded backbone .mxr has only 3 outputs (older box-prompt build).
+        """
+        return self._backbone(img_np)
+
+    def init_with_features(
+        self,
+        fpn_0: np.ndarray,
+        fpn_1: np.ndarray,
+        fpn_2: np.ndarray,
+        pos_2,  # may be None / unused
+        box: list[float],
+        point_coords: Optional[np.ndarray] = None,
+        point_labels: Optional[np.ndarray] = None,
+    ) -> tuple[np.ndarray, float]:
+        """Same as init_frame but caller supplies pre-computed backbone features.
+
+        Lets several trackers share one backbone call per frame.
+        """
+        t_total = time.perf_counter()
+        box_np = np.array([[[[box[0], box[1], box[2], box[3]]]]], dtype=np.float32)
+        if point_coords is None:
+            pts  = np.zeros((1, 1, 1, 2), dtype=np.float32)
+            lbls = np.full((1, 1, 1), -1, dtype=np.int32)
+        else:
+            pts  = point_coords.astype(np.float32)
+            lbls = point_labels.astype(np.int32)
+
+        t0 = time.perf_counter()
+        masks, _, score = self.dec_init.run(None, {
+            "fpn_2": fpn_2, "fpn_0": fpn_0, "fpn_1": fpn_1,
+            "input_points": pts, "input_labels": lbls, "input_boxes": box_np,
+        })
+        self._timings["dec_init"].append(time.perf_counter() - t0)
+
+        binary_mask = masks.squeeze() > 0
+        self._encode_memory(fpn_2, masks[0])
+        self._timings["total"].append(time.perf_counter() - t_total)
+        self._frame_idx += 1
+        return binary_mask, float(score.flat[0])
+
+    def propagate_with_features(
+        self,
+        fpn_0: np.ndarray,
+        fpn_1: np.ndarray,
+        fpn_2: np.ndarray,
+        pos_2,
+    ) -> tuple[np.ndarray, float]:
+        """Same as propagate_frame but caller supplies backbone features."""
+        t_total = time.perf_counter()
+        cur_feat = fpn_2.reshape(1, 256, self.HW).transpose(2, 0, 1)
         pos_2_valid = (pos_2 is not None and pos_2.size == 256 * self.HW)
         cur_pos  = (pos_2.reshape(1, 256, self.HW).transpose(2, 0, 1)
                     if pos_2_valid else np.zeros_like(cur_feat))
