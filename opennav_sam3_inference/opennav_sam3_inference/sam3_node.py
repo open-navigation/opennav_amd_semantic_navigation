@@ -62,10 +62,6 @@ class Sam3InferenceNode(Node):
         self.declare_parameter('device', 'cuda')
         self.declare_parameter('score_threshold', 0.5)
         self.declare_parameter('max_objects_per_prompt', 5)
-        # Wall-clock interval between SAM3 detections (ms).
-        #   0   = SAM3 every frame (most accurate, slowest)
-        #   >0  = SAM3 on keyframes every N ms; lightweight SAM2-style tracker
-        #         propagates masks between keyframes (recommended for multi-prompt)
         self.declare_parameter('redetect_interval_ms', 1000.0)
         # Bound GPU memory growth by periodically dropping the session's
         # accumulated per-frame raw pixel buffer + tracker per-obj history.
@@ -81,13 +77,8 @@ class Sam3InferenceNode(Node):
         # NOTE: OMP/MKL env caps at module top must be raised separately
         # via env var (OMP_NUM_THREADS=N) — those are import-time locked.
         self.declare_parameter('cpu_threads', 1)
-        # Text-bootstrap → box-prompt: number of initial text-mode frames used
-        # to capture high-confidence exemplar boxes. 0 disables bootstrap.
         self.declare_parameter('bootstrap_frames', 5)
         self.declare_parameter('bootstrap_min_score', 0.3)
-        # Wall-clock interval between automatic re-bootstrap cycles.
-        # Catches scene changes (indoor → outdoor, etc.) the score-only drift
-        # detection can miss. Set to 0 to disable.
         self.declare_parameter('periodic_rebootstrap_seconds', 180.0)
 
         checkpoint = self.get_parameter('checkpoint').value
