@@ -209,8 +209,8 @@ class SAM3Live:
         # score-only drift signal cannot detect — when exemplars find visually
         # similar surfaces in the new scene, scores stay high even though the
         # semantic content has changed.
-        # Precedence: constructor kwarg > env var > default 15s.
-        # Set to 0 to disable.
+        # Precedence: constructor kwarg > env var > default 180s. Shorter cadence
+        # (e.g. 15s) caused visible mask quality degradation. Set to 0 to disable.
         if periodic_rebootstrap_seconds is not None:
             self._periodic_rebootstrap_seconds = float(periodic_rebootstrap_seconds)
         else:

@@ -10,7 +10,7 @@ Why:
   fine for many frames from a single box prompt (12.21 FPS @504 on DAVIS).
 
 How:
-  ``SAM3HybridLive`` runs SAM3 detection every ``keyframe_every_ms`` milliseconds to
+  ``SAM3HybridLive`` runs SAM3 detection every ``redetect_interval_ms`` milliseconds to
   refresh per-prompt detections, then runs SAM2 trackers on intermediate frames
   in between. At each keyframe we re-associate new SAM3 detections to
   existing trackers by mask IoU to preserve obj_id continuity.
@@ -87,7 +87,7 @@ class SAM3HybridLive:
         dtype: torch.dtype = torch.float16,
         device: str | torch.device | None = None,
         mig: bool = True,
-        keyframe_every_ms: float = 1000.0,
+        redetect_interval_ms: float = 1000.0,
         max_objects_per_prompt: int | dict[str, int] | None = 5,
         iou_assoc_threshold: float = 0.3,
         # SAM3Live passthrough
@@ -97,10 +97,10 @@ class SAM3HybridLive:
         periodic_rebootstrap_seconds: float | None = None,
     ):
         """Args:
-            keyframe_every_ms: Wall-clock interval between SAM3 keyframe detections
+            redetect_interval_ms: Wall-clock interval between SAM3 keyframe detections
                 (milliseconds). Decoupled from camera frame rate — use a value that
                 reflects how fast the scene changes for your robot (e.g. 1000 ms for
-                indoor navigation at walking speed). 0 < keyframe_every_ms.
+                indoor navigation at walking speed). 0 < redetect_interval_ms.
                 The first frame is always a keyframe.
             iou_assoc_threshold: mask-IoU floor for re-using an existing obj_id
                 when a new SAM3 detection matches an existing tracker. Below
@@ -119,7 +119,7 @@ class SAM3HybridLive:
         """
         self.imgsz = imgsz
         self.onnx_dir = Path(onnx_dir)
-        self.keyframe_interval_s = max(0.001, float(keyframe_every_ms) / 1000.0)
+        self.keyframe_interval_s = max(0.001, float(redetect_interval_ms) / 1000.0)
         self.iou_thresh = float(iou_assoc_threshold)
         self.max_per_prompt = max_objects_per_prompt
 
@@ -163,7 +163,7 @@ class SAM3HybridLive:
         self._force_keyframe_next = True  # f=0 + after any reset
         self._last_was_keyframe = False
         self._last_keyframe_time: float = 0.0  # 0 → first frame always keyframe
-        print(f"[SAM3HybridLive] ready. keyframe_every_ms={keyframe_every_ms:.0f} "
+        print(f"[SAM3HybridLive] ready. redetect_interval_ms={redetect_interval_ms:.0f} "
               f"iou_thresh={self.iou_thresh}")
 
     # ------------------------------------------------------------------

@@ -24,16 +24,15 @@ sam3_inference:
     device: cuda
     score_threshold: 0.5
     max_objects_per_prompt: 5
-    redetect_interval_ms: 0.0
+    # Wall-clock interval between SAM3 detections.
+    #   0    = SAM3 every frame (most accurate, slowest, ~1.6 fps on multi-prompt)
+    #   >0   = SAM3 on keyframes every N ms; SAM2-style tracker propagates between.
+    # Default 1000ms (1Hz keyframes) is the recommended config for multi-prompt deploys.
+    redetect_interval_ms: 1000.0
     reset_tracking_every_seconds: 30.0  # bound GPU memory growth; 0 to disable
     queue_depth: 5
     start_enabled: true
     cpu_threads: 1  # cap torch/cv2 thread pools (see sam3_node.py); raise if CPU profiling shows starvation
-
-    # Hybrid pipeline (SAM3 detect every keyframe_every_ms, SAM2-tracker propagates between).
-    # Set use_hybrid: false for unconditional per-frame detection (~1.6 fps multi-prompt).
-    use_hybrid: true
-    keyframe_every_ms: 1000.0  # wall-clock interval; decoupled from camera frame rate
 
     # Text-bootstrap → box-prompt: first N keyframes capture exemplar boxes from text detections;
     # subsequent keyframes inject them as box prompts for stable multi-prompt tracking.
