@@ -13,15 +13,47 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ament_index_python.packages import get_package_share_directory
+import os
+from glob import glob
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import (
+    EnvironmentVariable,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.actions import SetEnvironmentVariable
+
+
+def _resolve_rocm_lib_dirs():
+    """Resolve the patched ROCm 7.2 (MIGraphX 2.16) lib directories.
+
+    The .mxr backbone artifacts are compiled with the patched MIGraphX and must
+    be loaded with the matching runtime, so the node needs that runtime ahead of
+    any other libmigraphx on the system (hence LD_PRELOAD). This mirrors the
+    autodetection used in setup.sh and tracker.py: honour ROCM_PATH, otherwise
+    fall back to the newest /opt/rocm-7.2.* install.
+
+    Returns (lib_dir, migraphx_lib_dir).
+    """
+    base = os.environ.get('ROCM_PATH', '').rstrip('/')
+    if not (base and os.path.isdir(os.path.join(base, 'lib'))):
+        base = next(
+            (p for p in sorted(glob('/opt/rocm-7.2.*'), reverse=True)
+             if os.path.isdir(os.path.join(p, 'lib'))),
+            '/opt/rocm-7.2.0',
+        )
+    lib_dir = os.path.join(base, 'lib')
+    migraphx_lib_dir = os.path.join(lib_dir, 'migraphx', 'lib')
+    return lib_dir, migraphx_lib_dir
 
 
 def generate_launch_description():
@@ -36,19 +68,28 @@ def generate_launch_description():
     namespace = LaunchConfiguration('namespace')
     log_level = LaunchConfiguration('log_level')
 
+    # Patched-MIGraphX runtime location (autodetected, ROCM_PATH-aware).
+    lib_dir, migraphx_lib_dir = _resolve_rocm_lib_dirs()
+    ld_preload = (
+        f'{lib_dir}/libmigraphx_c.so.3:'
+        f'{migraphx_lib_dir}/libmigraphx.so.2016000.0'
+    )
+
     return LaunchDescription([
+        # Prepend the patched-MIGraphX lib dirs (directories, not files) so its
+        # shared objects resolve ahead of any system-default ROCm install.
         SetEnvironmentVariable(
             name='LD_LIBRARY_PATH',
             value=[
-                '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
-                '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0:',
+                f'{lib_dir}:{migraphx_lib_dir}:',
                 EnvironmentVariable('LD_LIBRARY_PATH', default_value=''),
             ],
         ),
+        # The patched MIGraphX Python binding lives in the ROCm lib dir.
         SetEnvironmentVariable(
             name='PYTHONPATH',
             value=[
-                '/opt/rocm-7.2.0/lib:',
+                f'{lib_dir}:',
                 EnvironmentVariable('PYTHONPATH', default_value=''),
             ],
         ),
@@ -89,13 +130,13 @@ def generate_launch_description():
             namespace=namespace,
             output='screen',
             emulate_tty=True,
-            parameters=[params_file, {'use_sim_time', use_sim_time}],
+            parameters=[params_file, {'use_sim_time': use_sim_time}],
             remappings=[
                 ('~/image', image_topic),
-            ],  
-            additional_env={
-                'LD_PRELOAD': '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
-                '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0'},
+            ],
+            # LD_PRELOAD scoped to this node only: force the patched MIGraphX
+            # runtime so the .mxr backbone artifacts deserialize correctly.
+            additional_env={'LD_PRELOAD': ld_preload},
             arguments=['--ros-args', '--log-level', log_level],
         ),
         IncludeLaunchDescription(
@@ -103,5 +144,5 @@ def generate_launch_description():
                 PathJoinSubstitution([
                     pkg_share, 'launch', 'include', 'sensor_processing_pipeline.launch.py'])]),
             condition=IfCondition(sensor_processing_pipeline),
-        )
+        ),
     ])
