@@ -30,6 +30,7 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 import re
 import threading
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -122,6 +123,8 @@ class Sam3InferenceNode(Node):
 
         imgsz = _infer_imgsz(onnx_dir)
 
+        self._preflight(checkpoint, onnx_dir, device)
+
         self.get_logger().info(
             f'Loading SAM3 from {checkpoint} on {device} '
             f'(imgsz={imgsz}, onnx_dir={onnx_dir})'
@@ -131,48 +134,23 @@ class Sam3InferenceNode(Node):
         _boot_min = float(self.get_parameter('bootstrap_min_score').value)
         _periodic = float(self.get_parameter('periodic_rebootstrap_seconds').value)
 
-        if self._redetect_interval_ms <= 0.0:
-            from opennav_sam3_inference.tracker.live_inference import SAM3Live
-            self.get_logger().info(
-                f'redetect_interval_ms=0: instantiating SAM3Live '
-                f'(per-frame SAM3, bootstrap_frames={_boot})'
-            )
-            self._live = SAM3Live(
-                checkpoint=checkpoint,
-                prompts=self._prompts,
-                onnx_dir=onnx_dir,
-                imgsz=imgsz,
-                dtype=torch.float16,
-                device=device,
-                mig=True,
-                max_objects_per_prompt=max_objects,
-                redetect_every=1,
-                bootstrap_frames=_boot,
-                bootstrap_min_score=_boot_min,
-                periodic_rebootstrap_seconds=_periodic,
-            )
-        else:
-            from opennav_sam3_inference.tracker.hybrid_inference import SAM3HybridLive
-            self.get_logger().info(
-                f'redetect_interval_ms={self._redetect_interval_ms:.0f}: '
-                f'instantiating SAM3HybridLive (keyframes + tracker propagation, '
-                f'bootstrap_frames={_boot})'
-            )
-            self._live = SAM3HybridLive(
-                checkpoint=checkpoint,
-                prompts=self._prompts,
-                onnx_dir=onnx_dir,
-                imgsz=imgsz,
-                dtype=torch.float16,
-                device=device,
-                mig=True,
-                redetect_interval_ms=self._redetect_interval_ms,
-                max_objects_per_prompt=max_objects,
-                bootstrap_frames=_boot,
-                bootstrap_min_score=_boot_min,
-                periodic_rebootstrap_seconds=_periodic,
-            )
-
+        try:
+            self._instantiate_live(
+                checkpoint, onnx_dir, imgsz, device,
+                max_objects, _boot, _boot_min, _periodic)
+        except Exception as exc:
+            low = str(exc).lower()
+            if ('not an object for field' in low or 'migraphx' in low
+                    or '.mxr' in low):
+                raise RuntimeError(
+                    'Failed to load the MIGraphX .mxr artifacts. This '
+                    'usually means the patched MIGraphX runtime was not '
+                    'preloaded. Launch via `ros2 launch '
+                    'opennav_sam3_inference sam3_inference.launch.py` (it '
+                    'sets LD_PRELOAD), or export LD_PRELOAD for the patched '
+                    'libmigraphx (see README troubleshooting). Original '
+                    f'error: {exc}') from exc
+            raise
         self._prompt_to_class_id = dict(zip(self._prompts, self._class_ids))
 
         self._last_reset_time = self.get_clock().now()
@@ -296,6 +274,91 @@ class Sam3InferenceNode(Node):
         response.success = True
         response.message = f'Inference {state}'
         return response
+
+    def _preflight(self, checkpoint, onnx_dir, device):
+        """Fail fast with actionable messages for the common setup
+        mistakes (missing weights / un-built artifacts / no GPU / patched
+        MIGraphX not preloaded) instead of a deep MIGraphX or HuggingFace
+        stack trace."""
+        log = self.get_logger()
+
+        if not (Path(checkpoint) / 'model.safetensors').is_file():
+            raise RuntimeError(
+                f"SAM3 weights not found at '{checkpoint}/model.safetensors'. "
+                'Run setup.sh to download them, or point the "checkpoint" '
+                'parameter at the directory that holds model.safetensors.')
+
+        onnx = Path(onnx_dir)
+        imgsz = _infer_imgsz(onnx_dir)
+        backbone_mxr = onnx / 'backbone_detector' / 'tuned.mxr'
+        if not onnx.is_dir():
+            raise RuntimeError(
+                f"onnx_dir '{onnx_dir}' does not exist. Build artifacts with "
+                f'`python export/build.py --pipeline text --imgsz {imgsz}`, '
+                'or set the "onnx_dir" parameter to a built directory.')
+        if not backbone_mxr.is_file():
+            raise RuntimeError(
+                f"Build artifacts under '{onnx_dir}' look incomplete "
+                f'(missing backbone_detector/{backbone_mxr.name}). Re-run '
+                f'`python export/build.py --pipeline text --imgsz {imgsz}`.')
+
+        if device == 'cpu':
+            log.warn(
+                'Running on CPU: the MIGraphX-accelerated path needs an AMD '
+                'GPU. If a GPU is present, check ROCm and '
+                'HSA_OVERRIDE_GFX_VERSION.')
+
+        if not os.environ.get('LD_PRELOAD'):
+            log.warn(
+                'LD_PRELOAD is empty: the patched MIGraphX runtime may not '
+                'load and .mxr files can fail with "Not an object for '
+                'field: version". Launch via `ros2 launch '
+                'opennav_sam3_inference sam3_inference.launch.py` (it sets '
+                'LD_PRELOAD), or export it manually (see README).')
+
+    def _instantiate_live(self, checkpoint, onnx_dir, imgsz, device,
+                          max_objects, _boot, _boot_min, _periodic):
+        if self._redetect_interval_ms <= 0.0:
+            from opennav_sam3_inference.tracker.live_inference import SAM3Live
+            self.get_logger().info(
+                f'redetect_interval_ms=0: instantiating SAM3Live '
+                f'(per-frame SAM3, bootstrap_frames={_boot})'
+            )
+            self._live = SAM3Live(
+                checkpoint=checkpoint,
+                prompts=self._prompts,
+                onnx_dir=onnx_dir,
+                imgsz=imgsz,
+                dtype=torch.float16,
+                device=device,
+                mig=True,
+                max_objects_per_prompt=max_objects,
+                redetect_every=1,
+                bootstrap_frames=_boot,
+                bootstrap_min_score=_boot_min,
+                periodic_rebootstrap_seconds=_periodic,
+            )
+        else:
+            from opennav_sam3_inference.tracker.hybrid_inference import SAM3HybridLive
+            self.get_logger().info(
+                f'redetect_interval_ms={self._redetect_interval_ms:.0f}: '
+                f'instantiating SAM3HybridLive (keyframes + tracker propagation, '
+                f'bootstrap_frames={_boot})'
+            )
+            self._live = SAM3HybridLive(
+                checkpoint=checkpoint,
+                prompts=self._prompts,
+                onnx_dir=onnx_dir,
+                imgsz=imgsz,
+                dtype=torch.float16,
+                device=device,
+                mig=True,
+                redetect_interval_ms=self._redetect_interval_ms,
+                max_objects_per_prompt=max_objects,
+                bootstrap_frames=_boot,
+                bootstrap_min_score=_boot_min,
+                periodic_rebootstrap_seconds=_periodic,
+            )
 
     def _on_image(self, msg: Image):
         self.get_logger().info(  # TODO back to debug
