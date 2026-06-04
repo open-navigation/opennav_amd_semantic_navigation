@@ -103,7 +103,7 @@ class Sam3InferenceNode(Node):
         if not Path(checkpoint).is_dir():
             raise RuntimeError(f"Checkpoint directory {checkpoint} isn't valid!")
         
-        if not Path(checkpoint).is_dir():
+        if not Path(onnx_dir).is_dir():
             raise RuntimeError(f"ONNX files directory {onnx_dir} isn't valid!")
 
         # Apply CPU thread caps from parameter (see declare_parameter above).
