@@ -477,9 +477,9 @@ class SAM3Live:
                 # sweet spot. cap=1 too restrictive (range tighter on area
                 # but misses spatial diversity); cap>=5 starts bleeding the
                 # class concept into adjacent-class edge regions (e.g. floor
-                # bleeding into baseboards/踢脚线 when cap=10 on Steve's
-                # hallway bag). Top-K-by-area keeps the largest exemplar
-                # patches — most representative of the central class region.
+                # bleeding into baseboards at cap=10 in hallway scenes).
+                # Top-K-by-area keeps the largest exemplar patches — most
+                # representative of the central class region.
                 # Env-var overridable for tuning.
                 import os as _os
                 cap = int(_os.environ.get("SAM3_BOOTSTRAP_BOX_CAP", "3"))
