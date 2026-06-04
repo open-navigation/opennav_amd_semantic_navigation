@@ -633,6 +633,7 @@ class SAM3OnnxTracker:
         if self._mxr_backbone is not None:
             result = self._mxr_backbone(img_np)
         else:
+            import torch
             pv = torch.from_numpy(img_np).to(self.device).half()
             with torch.inference_mode():
                 vis = self.vision_encoder(pv, return_dict=True)

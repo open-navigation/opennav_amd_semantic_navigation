@@ -46,6 +46,7 @@ Each step skips if its output already exists. Safe to re-run after interruption.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -193,6 +194,7 @@ def build_text(imgsz: int, args) -> bool:
 # Final demo hints
 # ─────────────────────────────────────────────────────────────────────────────
 
+_rocm_base = os.environ.get("ROCM_PATH", "/opt/rocm-7.2.0").rstrip("/")
 LD = (f"LD_PRELOAD=" + _rocm_base + "/lib/libmigraphx_c.so.3:"
       f"{_rocm_base}/lib/migraphx/lib/libmigraphx.so.2016000.0")
 
