@@ -35,13 +35,6 @@ from sensor_msgs.msg import Image
 from std_srvs.srv import SetBool
 from vision_msgs.msg import LabelInfo, VisionClass
 
-SAM3_MODEL_DIR = ''
-ONNX_FILES_DIR = ''
-
-if (os.environ.get("SAM3_MODEL_DIR")):
-    SAM3_MODEL_DIR = Path(os.environ.get("SAM3_MODEL_DIR", "").rstrip("/")) / "sam3"
-    ONNX_FILES_DIR = Path(os.environ.get("SAM3_MODEL_DIR", "").rstrip("/")) / "onnx_files_504"
-
 # Module-level cache so the same class_id always draws the same color
 # across frames and across prompt-reconfigurations.
 _COLOR_CACHE: dict[int, np.ndarray] = {}
@@ -62,8 +55,8 @@ class Sam3InferenceNode(Node):
     def __init__(self):
         super().__init__('sam3_inference')
 
-        self.declare_parameter('checkpoint', str(SAM3_MODEL_DIR))
-        self.declare_parameter('onnx_dir', str(ONNX_FILES_DIR))
+        self.declare_parameter('checkpoint', '')
+        self.declare_parameter('onnx_dir', '')
         self.declare_parameter('prompts', ['object'])
         self.declare_parameter('class_ids', [1])
         self.declare_parameter('device', 'cuda')
