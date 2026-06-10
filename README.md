@@ -168,7 +168,7 @@ If you have not already, you must create a hugging face account and do the follo
 
 Refer to the [README](opennav_sam3_setup/README.md) inside `opennav_sam3_setup` for instructions on setting up the environment before the following steps.
 
-See the node parameters in `sam3_inference.yaml` to configure the classes and detection parameters for SAM3.
+See the node parameters in `sam3_inference.yaml` and set the `checkpoint` and `onnx_dir` paths to the one used in setup. Also configure the classes and detection parameters for SAM3.
 
 ##### First time build
 

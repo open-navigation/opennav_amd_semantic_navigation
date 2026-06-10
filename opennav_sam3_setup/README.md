@@ -45,6 +45,4 @@ The script outputs files in the same `SAM3_MODEL_DIR` under `onnx_files_*` folde
 
 ## Setting up without the environment variable
 
-If the environment variable for storing model weights and artifacts isn't set, the scripts will output within the `opennav_sam3_setup` directory that can later be moved to another location. 
-
-Also make sure to provide full paths in the inference node config.
+If the environment variable for storing model weights and artifacts isn't set, the scripts will output within the `opennav_sam3_setup` directory that can later be moved to another location.
