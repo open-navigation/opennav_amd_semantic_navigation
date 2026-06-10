@@ -198,7 +198,6 @@ Now you can source the workspace as usual and launch the inference node, even ou
 
 - Always build the inference package `opennav_sam3_inference` inside the conda environment.
 - Build everything else outside the conda environment excluding the inference package.
-- When in question, just delete the inference package folder from `build` and `install` spaces and rebuild inside the conda environment.
 
 ##### Run the inference stack
 
