@@ -17,3 +17,4 @@ pycocotools>=2.0
 huggingface-hub>=0.20
 flatbuffers
 protobuf
+colcon-common-extensions

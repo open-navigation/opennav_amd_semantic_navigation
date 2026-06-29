@@ -39,8 +39,8 @@ def parse_args():
                    choices=[504, 1008],
                    help="Resolution(s) to build (default: 504). Pass both to build all.")
     p.add_argument("--checkpoint", type=Path,
-                   default=WORKSPACE / "model/sam3",
-                   help="Path to model/sam3 (default: model/sam3)")
+                   default=WORKSPACE / "/sam3",
+                   help="Path to /sam3 (default: /sam3)")
     p.add_argument("--onnx-root", type=Path, default=None,
                    help="Root for onnx_files_<imgsz>/ dirs (default: project root)")
     p.add_argument("--force", action="store_true",
@@ -72,10 +72,22 @@ def run(cmd: list[str], label: str) -> bool:
     return True
 
 
+def _display(path: Path) -> Path | str:
+    """Path relative to WORKSPACE when possible, else the absolute path.
+
+    Output dirs can live outside the repo (e.g. --onnx-root pointing at an
+    external models directory), so relative_to() may not apply.
+    """
+    try:
+        return path.relative_to(WORKSPACE)
+    except ValueError:
+        return path
+
+
 def exists(path: Path, label: str, force: bool) -> bool:
     """Return True (skip) if path exists and not forcing."""
     if not force and path.exists():
-        print(f"  skip: {label} already exists at {path.relative_to(WORKSPACE)}")
+        print(f"  skip: {label} already exists at {_display(path)}")
         return True
     return False
 
@@ -98,6 +110,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
             ok = ok and run([
                 sys.executable,
                 "export/backbone/export_backbone_single.py",
+                "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
                 "--checkpoint", str(args.checkpoint),
@@ -133,8 +146,10 @@ def build_for_imgsz(imgsz: int, args) -> bool:
             ok = ok and run([
                 sys.executable,
                 "export/detector/export_detr_encoder.py",
+                "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--checkpoint", str(args.checkpoint),
+                "--text-seq-len", str(64),
             ], f"[4/5] Export DETR encoder @{imgsz}px")
 
     # ── Step 5: export memory_attention ──────────────────────────────────
@@ -147,6 +162,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
             ok = ok and run([
                 sys.executable,
                 "export/tracker_modules/export_memory_attention_padded.py",
+                "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--ptr-tokens", str(ptr_tokens),
                 "--checkpoint", str(args.checkpoint),
@@ -164,7 +180,7 @@ def main():
         print(f"\n{'='*60}")
         print(f"  Building text-prompt MIG artefacts @ {imgsz}px")
         print(f"  checkpoint : {args.checkpoint}")
-        print(f"  onnx_files : onnx_files_{imgsz}/")
+        print(f"  onnx_files : {args.onnx_root}/onnx_files_{imgsz}")
         print(f"{'='*60}")
         ok = build_for_imgsz(imgsz, args)
         all_ok = all_ok and ok
@@ -177,14 +193,7 @@ def main():
     print(f"{'='*60}")
 
     if all_ok:
-        imgsz_list = " ".join(str(i) for i in args.imgsz)
-        print(f"""
-Next: run the demo with --mig
-  LD_PRELOAD=/opt/rocm-7.2.x/lib/libmigraphx_c.so.3:/opt/rocm-7.2.x/lib/migraphx/lib/libmigraphx.so.2016000.0 \\
-    python demo_text.py --checkpoint {args.checkpoint} \\
-      --video assets/blackswan.mp4 --text "swan" \\
-      --imgsz {args.imgsz[0]} --mig --onnx-dir onnx_files_{args.imgsz[0]} --max-frames 60
-""")
+        print("Build complete!")
     return 0 if all_ok else 1
 
 

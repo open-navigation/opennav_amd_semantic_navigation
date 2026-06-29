@@ -63,6 +63,53 @@ def parse_args():
     return p.parse_args()
 
 
+def retarget_resolution(model, new_imgsz: int) -> None:
+    """Re-initialize all RoPE buffers for a different input resolution.
+
+    Works for both Sam3TrackerVideoModel (prompt_encoder on the model) and
+    Sam3VideoModel (prompt_encoder under .tracker_model). Vendored from the
+    tracker package so this setup bundle stays self-contained.
+    """
+    from transformers.models.sam3.modeling_sam3 import Sam3ViTRotaryEmbedding
+    from transformers.models.sam3_tracker_video.modeling_sam3_tracker_video import (
+        Sam3TrackerVideoVisionRotaryEmbedding,
+    )
+
+    new_H = new_imgsz // 14
+    model.config.image_size = new_imgsz
+    model.config.memory_attention_rope_feat_sizes = [new_H, new_H]
+    model.image_size = new_imgsz
+    # prompt_encoder lives on Sam3TrackerVideoModel directly, but on
+    # Sam3VideoModel it lives under .tracker_model. Be defensive.
+    pe = getattr(model, "prompt_encoder", None) or \
+        getattr(getattr(model, "tracker_model", None), "prompt_encoder", None)
+    if pe is not None:
+        pe.image_embedding_size = (new_H, new_H)
+        pe.mask_input_size = (4 * new_H, 4 * new_H)
+        pe.input_image_size = new_imgsz
+
+    for _, mod in model.named_modules():
+        dev   = getattr(mod, "rope_embeddings_cos", torch.tensor(0)).device
+        dtype = getattr(mod, "rope_embeddings_cos", torch.tensor(0.0)).dtype
+        if isinstance(mod, Sam3ViTRotaryEmbedding) and mod.end_x > new_H:
+            mod.end_x = mod.end_y = new_H
+            freqs = 1.0 / (mod.rope_theta ** (
+                torch.arange(0, mod.dim, 4)[:mod.dim // 4].float() / mod.dim))
+            flat = torch.arange(new_H * new_H, dtype=torch.long)
+            xp = (flat % new_H).float() * mod.scale
+            yp = torch.div(flat, new_H, rounding_mode="floor").float() * mod.scale
+            inv = torch.cat(
+                [torch.outer(xp, freqs), torch.outer(yp, freqs)], dim=-1
+            ).repeat_interleave(2, dim=-1)
+            mod.register_buffer("rope_embeddings_cos", inv.cos().to(dev, dtype), persistent=False)
+            mod.register_buffer("rope_embeddings_sin", inv.sin().to(dev, dtype), persistent=False)
+        elif isinstance(mod, Sam3TrackerVideoVisionRotaryEmbedding):
+            mod.end_x = mod.end_y = new_H
+            inv = mod.create_inv_freq()
+            mod.register_buffer("rope_embeddings_cos", inv.cos().to(dev, dtype), persistent=False)
+            mod.register_buffer("rope_embeddings_sin", inv.sin().to(dev, dtype), persistent=False)
+
+
 class SingleSessionBackbone(nn.Module):
     """Whole vision_encoder (ViT backbone + FPN neck) as one graph.
 
@@ -95,8 +142,6 @@ def main():
     sub_dir = args.onnx_dir / f"backbone_{args.backbone_source}"
     sub_dir.mkdir(parents=True, exist_ok=True)
     out_path = sub_dir / "single_fp32.onnx"
-
-    from tracker.tracker import retarget_resolution
 
     if args.backbone_source == "tracker":
         from transformers.models.sam3_tracker_video.modeling_sam3_tracker_video import (

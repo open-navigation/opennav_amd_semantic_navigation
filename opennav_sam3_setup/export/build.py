@@ -31,12 +31,17 @@ Each step skips if its output already exists. Safe to re-run after interruption.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-WORKSPACE = Path(__file__).resolve().parent.parent
+MODULES_ROOT_DIR = Path(__file__).resolve().parent.parent
+SAM3_MODEL_DIR = MODULES_ROOT_DIR
+
+if (os.environ.get("SAM3_MODEL_DIR")):
+    SAM3_MODEL_DIR = Path(os.environ.get("SAM3_MODEL_DIR").rstrip("/"))
 
 G  = "\033[32m"
 B  = "\033[1m"
@@ -59,7 +64,7 @@ def step_header(msg: str) -> None:
 def run(cmd: list, label: str) -> bool:
     print(f"\n  $ {' '.join(str(c) for c in cmd)}")
     t0 = time.perf_counter()
-    r = subprocess.run(cmd, cwd=WORKSPACE)
+    r = subprocess.run(cmd, cwd=MODULES_ROOT_DIR)
     elapsed = time.perf_counter() - t0
     if r.returncode != 0:
         print(f"\n  {Y}✗ FAILED{NC} after {elapsed:.0f}s (exit {r.returncode})")
@@ -70,7 +75,11 @@ def run(cmd: list, label: str) -> bool:
 
 def skip_if_exists(path: Path, label: str, force: bool) -> bool:
     if not force and path.exists():
-        print(f"  skip  {label}  ({path.relative_to(WORKSPACE)})")
+        try:
+            shown = path.relative_to(SAM3_MODEL_DIR)
+        except ValueError:
+            shown = path
+        print(f"  skip  {label}  ({shown})")
         return True
     return False
 
@@ -80,7 +89,7 @@ def skip_if_exists(path: Path, label: str, force: bool) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_box(imgsz: int, args) -> bool:
-    onnx_dir  = WORKSPACE / f"onnx_files_{imgsz}"
+    onnx_dir  = SAM3_MODEL_DIR / f"onnx_files_{imgsz}"
     mod_dir   = onnx_dir / "tracker_modules"
     bb_dir    = onnx_dir / "backbone_tracker"
     steps     = set(args.steps)
@@ -109,6 +118,7 @@ def build_box(imgsz: int, args) -> bool:
                 sys.executable,
                 "export/backbone/export_backbone_single.py",
                 "--imgsz", str(imgsz),
+                "--onnx_dir", str(onnx_dir),
                 "--backbone-source", "tracker",
                 "--checkpoint", str(args.checkpoint),
             ], "Export backbone ONNX (tracker FPN)")
@@ -161,6 +171,7 @@ def build_text(imgsz: int, args) -> bool:
         "export/build_text_prompt_mig.py",
         "--imgsz", str(imgsz),
         "--checkpoint", str(args.checkpoint),
+        "--onnx-root", str(SAM3_MODEL_DIR),
     ]
     # Only forward --ptr-tokens if user explicitly set it; otherwise let
     # build_text_prompt_mig.py pick the per-imgsz default (504→64, 1008→48).
@@ -175,38 +186,10 @@ def build_text(imgsz: int, args) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Final demo hints
-# ─────────────────────────────────────────────────────────────────────────────
-
-LD = (f"LD_PRELOAD=" + _rocm_base + "/lib/libmigraphx_c.so.3:"
-      f"{_rocm_base}/lib/migraphx/lib/libmigraphx.so.2016000.0")
-
-def print_hints(pipeline: str, imgsz_list: list[int], checkpoint: Path) -> None:
-    banner("Done — next steps")
-    first = imgsz_list[0]
-
-    if pipeline in ("box", "all"):
-        print(f"""
-{B}Box-prompt demo:{NC}
-  python demo.py --checkpoint {checkpoint} --onnx-dir onnx_files_{first} \\
-      --video YOUR_VIDEO.mp4 --box x1,y1,x2,y2
-""")
-
-    if pipeline in ("text", "all"):
-        print(f"""\
-{B}Text-prompt demo (MIG-accelerated):{NC}
-  {LD} \\
-      python demo_text.py --checkpoint {checkpoint} \\
-          --video YOUR_VIDEO.mp4 --text "object" \\
-          --imgsz {first} --mig --onnx-dir onnx_files_{first}
-""")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def parse_args():
+def parse_args():    
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -215,7 +198,7 @@ def parse_args():
     p.add_argument("--imgsz", type=int, nargs="+", default=[504],
                    choices=[504, 1008],
                    help="Resolution(s) to build (default: 504)")
-    p.add_argument("--checkpoint", type=Path, default=WORKSPACE / "model/sam3")
+    p.add_argument("--checkpoint", type=Path, default=SAM3_MODEL_DIR / "sam3")
     p.add_argument("--force", action="store_true",
                    help="Rebuild even if output files already exist")
     p.add_argument("--steps", nargs="+", default=["all"],
@@ -231,7 +214,7 @@ def main():
     t_start = time.perf_counter()
 
     banner(f"SAM3 artifact build  |  pipeline={args.pipeline}  "
-           f"imgsz={args.imgsz}  checkpoint={args.checkpoint.name}")
+           f"imgsz={args.imgsz}  checkpoint={args.checkpoint}")
 
     all_ok = True
     for imgsz in args.imgsz:
@@ -245,7 +228,7 @@ def main():
     banner(f"Total: {elapsed/60:.1f} min  |  {status}")
 
     if all_ok:
-        print_hints(args.pipeline, args.imgsz, args.checkpoint)
+        print("Build artifacts ready!")
 
     return 0 if all_ok else 1
 

@@ -14,7 +14,7 @@ set -euo pipefail
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 CONDA_ENV="${SAM3_CONDA_ENV:-opennav-sam3-inference}"
-MODEL_DIR="${SAM3_MODEL_DIR:-model/sam3}"
+
 SKIP_APT=false
 SKIP_MIGRAPHX=false
 AUTO_YES=false
@@ -68,6 +68,9 @@ ROCM_PATH="$(_detect_rocm_path)"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
+MODEL_DIR_ROOT="${SAM3_MODEL_DIR:-$REPO_DIR}"
+MODEL_DIR=$MODEL_DIR_ROOT/sam3
+
 echo -e "${G}"
 echo "  ╔══════════════════════════════════════════════════╗"
 echo "  ║  SAM3 Video Tracker — ROCm Setup                 ║"
@@ -75,7 +78,6 @@ echo "  ║  Target: gfx1151 (Ryzen AI Max+ 395)             ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
 echo "  Conda env : $CONDA_ENV"
-echo "  Resolution: ${IMGSZ}px"
 echo "  Model dir : $MODEL_DIR"
 echo ""
 
@@ -234,9 +236,9 @@ if [[ -f "$WEIGHT_FILE" ]]; then
     SIZE=$(du -sh "$WEIGHT_FILE" | cut -f1)
     info "Weights already present ($WEIGHT_FILE, $SIZE)"
 else
-    echo ""
+    echo "  Could not find model weights file: $WEIGHT_FILE"
     echo "  SAM3 model weights (~3.3 GB) are required."
-    echo "  Config/tokenizer files are already included in this repo."
+    echo "  Config/tokenizer files are already included."
     echo ""
     # huggingface_hub >=1.0 ships the new `hf` CLI and removes huggingface-cli.
     # Older versions only ship huggingface-cli. Pick whichever is available.
@@ -259,6 +261,8 @@ else
     fi
     if [[ "$yn" =~ ^[Yy] ]]; then
         mkdir -p "$MODEL_DIR"
+        cp $REPO_DIR/model-configs/* $MODEL_DIR
+        
         # --local-dir-use-symlinks was removed in huggingface_hub 1.0; only pass
         # to old huggingface-cli.
         if [[ "$HF" == "huggingface-cli" ]]; then
@@ -270,7 +274,7 @@ else
         mv "$MODEL_DIR/sam3.safetensors" "$MODEL_DIR/model.safetensors"
         info "Weights downloaded → $WEIGHT_FILE"
     else
-        warn "Skipping weights — place model.safetensors in $MODEL_DIR/ then re-run"
+        warn "Skipping weights — place model.safetensors in $MODEL_DIR then re-run"
         exit 0
     fi
 fi

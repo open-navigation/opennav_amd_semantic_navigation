@@ -25,6 +25,7 @@ import rclpy
 import torch
 from cv_bridge import CvBridge
 from opennav_sam3_msgs.srv import ChangePrompt
+from pathlib import Path
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -33,7 +34,6 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from sensor_msgs.msg import Image
 from std_srvs.srv import SetBool
 from vision_msgs.msg import LabelInfo, VisionClass
-
 
 # Module-level cache so the same class_id always draws the same color
 # across frames and across prompt-reconfigurations.
@@ -55,8 +55,8 @@ class Sam3InferenceNode(Node):
     def __init__(self):
         super().__init__('sam3_inference')
 
-        self.declare_parameter('checkpoint', 'models/sam3')
-        self.declare_parameter('onnx_dir', 'onnx_files_504')
+        self.declare_parameter('checkpoint', '')
+        self.declare_parameter('onnx_dir', '')
         self.declare_parameter('prompts', ['object'])
         self.declare_parameter('class_ids', [1])
         self.declare_parameter('device', 'cuda')
@@ -95,6 +95,12 @@ class Sam3InferenceNode(Node):
             'reset_tracking_every_seconds').value
         queue_depth = self.get_parameter('queue_depth').value
         self._enabled = self.get_parameter('start_enabled').value
+
+        if not Path(checkpoint).is_dir():
+            raise RuntimeError(f"Checkpoint directory {checkpoint} isn't valid!")
+        
+        if not Path(onnx_dir).is_dir():
+            raise RuntimeError(f"ONNX files directory {onnx_dir} isn't valid!")
 
         # Apply CPU thread caps from parameter (see declare_parameter above).
         # Runtime setters are required: torch ignores TORCH_NUM_THREADS env
@@ -388,7 +394,12 @@ def _render_overlay(rgb: np.ndarray, instances, alpha: float = 0.5) -> np.ndarra
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Sam3InferenceNode()
+    try:
+        node = Sam3InferenceNode()
+    except Exception as exc:
+        rclpy.logging.get_logger('sam3_inference').fatal(str(exc))
+        rclpy.shutdown()
+        return
     executor = MultiThreadedExecutor(num_threads=3)
     executor.add_node(node)
     try:

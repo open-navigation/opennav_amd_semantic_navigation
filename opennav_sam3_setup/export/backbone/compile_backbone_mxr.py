@@ -76,9 +76,10 @@ def main():
     # MIGraphX Python binding lives in /opt/rocm-7.2.x/lib — add it if not
     # already on sys.path (e.g. when invoked as a subprocess without PYTHONPATH).
     import glob as _g
+    _rocm_path = os.environ.get("ROCM_PATH", "").rstrip("/")
     _mxr_lib = (
-        (os.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-        if os.path.isdir(os.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
+        (_rocm_path + "/lib")
+        if _rocm_path and os.path.isdir(_rocm_path + "/lib")
         else next(
             (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
              if os.path.isdir(p)), "/opt/rocm-7.2.0/lib"
