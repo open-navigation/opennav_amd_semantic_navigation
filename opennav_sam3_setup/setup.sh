@@ -5,11 +5,12 @@
 #   ./setup.sh                        # full setup
 #   ./setup.sh --skip-apt             # skip ROCm 7.2 APT install (already done)
 #   ./setup.sh --skip-migraphx        # skip patched MIGraphX install (already done)
+#   ./setup.sh --skip-weights         # skip downloading model weights
 #   ./setup.sh --env my-env           # custom conda environment name
+#   ./setup.sh --yes                  # run in non-interactive mode assuming yes for all options
 #
 # Environment variables (alternative to flags):
 #   SAM3_CONDA_ENV=opennav-sam3-inference       conda environment name
-#   SAM3_MODEL_DIR=model/sam3         where to place model weights
 set -euo pipefail
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
@@ -17,6 +18,7 @@ CONDA_ENV="${SAM3_CONDA_ENV:-opennav-sam3-inference}"
 
 SKIP_APT=false
 SKIP_MIGRAPHX=false
+SKIP_MODEL_WEIGHTS=false
 AUTO_YES=false
 
 # Pinned package versions — update together if you change the ROCm stack
@@ -36,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-apt)       SKIP_APT=true ;;
         --skip-migraphx)  SKIP_MIGRAPHX=true ;;
+        --skip-weights)   SKIP_MODEL_WEIGHTS=true ;;
         --yes)            AUTO_YES=true ;;
         --env)            CONDA_ENV="$2"; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
@@ -65,12 +68,6 @@ _detect_rocm_path() {
 }
 ROCM_PATH="$(_detect_rocm_path)"
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$REPO_DIR"
-
-MODEL_DIR_ROOT="${SAM3_MODEL_DIR:-$REPO_DIR}"
-MODEL_DIR=$MODEL_DIR_ROOT/sam3
-
 echo -e "${G}"
 echo "  ╔══════════════════════════════════════════════════╗"
 echo "  ║  SAM3 Video Tracker — ROCm Setup                 ║"
@@ -78,20 +75,11 @@ echo "  ║  Target: gfx1151 (Ryzen AI Max+ 395)             ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
 echo "  Conda env : $CONDA_ENV"
-echo "  Model dir : $MODEL_DIR"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
 step "0. Prerequisites"
 # ─────────────────────────────────────────────────────────────────────────────
-if command -v rocminfo &>/dev/null; then
-    GPU=$(rocminfo 2>/dev/null | grep -oP 'gfx\d+' | head -1 || echo "unknown")
-    info "GPU: $GPU"
-    [[ "$GPU" == "gfx1151" ]] || warn "GPU is $GPU — tested on gfx1151 only. Proceeding anyway."
-else
-    warn "rocminfo not found — cannot verify GPU. Proceeding."
-fi
-
 # Locate conda
 if ! command -v conda &>/dev/null; then
     for p in ~/miniforge3/bin/conda ~/miniconda3/bin/conda /opt/conda/bin/conda; do
@@ -153,10 +141,14 @@ else
     echo "${MXR_SHA256}  $TMP_MXR/$MXR_ASSET" | sha256sum --check --quiet
     echo "  Installing (requires sudo)..."
     tar -xzf "$TMP_MXR/$MXR_ASSET" -C "$TMP_MXR"
-    cd "$TMP_MXR/migraphx-2.15+patches"
-    sudo BUILD=. ROCM="$ROCM_PATH" bash install_migraphx_patched.sh
-    cd "$REPO_DIR"
+    
+    if [ ! -d "$ROCM_PATH/lib/migraphx/lib" ]; then
+        sudo mkdir -p "$ROCM_PATH/lib/migraphx/lib"
+    fi
+    
+    (cd "$TMP_MXR/migraphx-2.15+patches" && sudo BUILD=. ROCM="$ROCM_PATH" bash install_migraphx_patched.sh)
     rm -rf "$TMP_MXR"
+    
     info "Patched MIGraphX installed"
 fi
 
@@ -226,61 +218,21 @@ step "4. Python dependencies"
 pip install -q -r requirements.txt
 info "requirements.txt installed"
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-step "5. Model weights"
+step "5. Download model weights"
 # ─────────────────────────────────────────────────────────────────────────────
-WEIGHT_FILE="$MODEL_DIR/model.safetensors"
-
-if [[ -f "$WEIGHT_FILE" ]]; then
-    SIZE=$(du -sh "$WEIGHT_FILE" | cut -f1)
-    info "Weights already present ($WEIGHT_FILE, $SIZE)"
+if [ ! $SKIP_MODEL_WEIGHTS ] && [ ! $AUTO_YES ] ; then
+    $PWD/download-weights.sh
+elif [ ! $SKIP_MODEL_WEIGHTS ] && [ $AUTO_YES ] ; then
+    $PWD/download-weights.sh --yes
 else
-    echo "  Could not find model weights file: $WEIGHT_FILE"
-    echo "  SAM3 model weights (~3.3 GB) are required."
-    echo "  Config/tokenizer files are already included."
     echo ""
-    # huggingface_hub >=1.0 ships the new `hf` CLI and removes huggingface-cli.
-    # Older versions only ship huggingface-cli. Pick whichever is available.
-    if command -v hf >/dev/null 2>&1; then HF=hf; else HF=huggingface-cli; fi
-
-    echo "  Option A — Official (requires HuggingFace account + accepted terms):"
-    echo "    https://huggingface.co/facebook/sam3"
-    echo "    $HF download facebook/sam3 model.safetensors --local-dir $MODEL_DIR"
+    echo "Skipped downloading SAM3 model weights"
     echo ""
-    echo "  Option B — Community mirror (no account needed, same weights):"
-    echo "    $HF download 1038lab/sam3 sam3.safetensors --local-dir $MODEL_DIR"
-    echo "    mv $MODEL_DIR/sam3.safetensors $MODEL_DIR/model.safetensors"
-    echo ""
-    if $AUTO_YES; then
-        yn="Y"
-        echo "  Download via Option B now? [Y/n] Y  (auto-yes)"
-    else
-        read -rp "  Download via Option B now? [Y/n] " yn
-        yn="${yn:-Y}"
-    fi
-    if [[ "$yn" =~ ^[Yy] ]]; then
-        mkdir -p "$MODEL_DIR"
-        cp $REPO_DIR/model-configs/* $MODEL_DIR
-        
-        # --local-dir-use-symlinks was removed in huggingface_hub 1.0; only pass
-        # to old huggingface-cli.
-        if [[ "$HF" == "huggingface-cli" ]]; then
-            "$HF" download 1038lab/sam3 sam3.safetensors \
-                --local-dir "$MODEL_DIR" --local-dir-use-symlinks False
-        else
-            "$HF" download 1038lab/sam3 sam3.safetensors --local-dir "$MODEL_DIR"
-        fi
-        mv "$MODEL_DIR/sam3.safetensors" "$MODEL_DIR/model.safetensors"
-        info "Weights downloaded → $WEIGHT_FILE"
-    else
-        warn "Skipping weights — place model.safetensors in $MODEL_DIR then re-run"
-        exit 0
-    fi
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Environment ready — print next-step instructions
+# Environment ready
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${G}══════════════════════════════════════════════════════${NC}"
