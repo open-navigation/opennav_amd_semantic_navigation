@@ -2,6 +2,9 @@
 ---
 # color
 enable_color: true
+# color_width: 1920
+# color_height: 1080
+# color_fps: 8
 enable_hdr_merge: true
 color.image_raw.enable_pub_plugins: ["image_transport/raw"]
 
