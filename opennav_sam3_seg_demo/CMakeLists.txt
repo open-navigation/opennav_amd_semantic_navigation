@@ -96,4 +96,10 @@ install(
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(
+  PROGRAMS ${PROJECT_NAME}/image_viewer.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME image_display
+)
+
 ament_package()
