@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>opennav_sam3_seg_demo</name>
+  <version>0.0.1</version>
+  <description>Demonstration package for SAM3 segmentation</description>
+  <maintainer email="helloarm@pm.me">Abhishekh Reddy</maintainer>
+  <license>APACHE</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>qtbase5-dev</build_depend>
+
+  <depend>rclcpp</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>qt_gui_cpp</depend>
+  <depend>pluginlib</depend>
+
+  <depend>libqt5-core</depend>
+  <depend>libqt5-gui</depend>
+  <depend>libqt5-opengl</depend>
+  <depend>libqt5-widgets</depend>
+
+  <depend>opennav_sam3_msgs</depend>
+
+  <exec_depend>opennav_sam3_inference</exec_depend>
+  <exec_depend>rqt_image_view</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

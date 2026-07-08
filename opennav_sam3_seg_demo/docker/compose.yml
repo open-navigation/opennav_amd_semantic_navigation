@@ -1,0 +1,48 @@
+services:
+  sam3-demo:
+    image: sam3-demo
+    build:
+      context: ../../
+      dockerfile: ./opennav_sam3_seg_demo/docker/sam3-demo.Dockerfile
+      args:
+        USERNAME: sam3-demo-usr
+        USER_UID: ${UID:-1000}
+        USER_GID: ${UID:-1000}
+        RENDER_GID: ${RENDER_GID:-110}
+
+    container_name: sam3-demo
+    user: sam3-demo-usr
+
+    network_mode: host
+    ipc: host
+    pid: host
+
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    
+    shm_size: 256mb
+
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /run/user/${UID:-1000}:/run/user/${UID:-1000}
+      - ../../opennav_sam3_setup:/home/sam3-demo-usr/opennav_sam3_setup
+      - ../config/:/home/sam3-demo-usr/configs
+      - ${SAM3_MODEL_DIR:-../../opennav-sam3-inference-model}:/home/sam3-demo-usr/opennav-sam3-inference-model
+
+    environment:
+      # Display / GUI
+      DISPLAY: ${DISPLAY}
+      XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR}
+      SAM3_MODEL_DIR: /home/sam3-demo-usr/opennav-sam3-inference-model
+      HF_TOKEN: ${HF_TOKEN}
+
+    working_dir: /home/sam3-demo-usr/
+    entrypoint: /home/sam3-demo-usr/entrypoint.sh
+
+    stdin_open: true   # docker run -i
+    tty: true          # docker run -t
+
+    restart: no
+    privileged: true

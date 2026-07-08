@@ -1,0 +1,17 @@
+# camera parameters for orbbec gemini 335 camera
+---
+# color
+enable_color: true
+color_width: 640
+color_height: 360
+color_fps: 6
+color.image_raw.enable_pub_plugins: ["image_transport/raw"]
+
+# depth
+enable_depth: false
+depth_registration: false
+enable_laser: false
+
+# point_cloud
+enable_point_cloud: false
+enable_colored_point_cloud: false
