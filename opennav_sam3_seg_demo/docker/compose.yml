@@ -8,7 +8,7 @@ services:
         USERNAME: sam3-demo-usr
         USER_UID: ${UID:-1000}
         USER_GID: ${UID:-1000}
-        RENDER_GID: ${RENDER_GID:-110}
+        RENDER_GID: ${RENDER_GID:-992}
 
     container_name: sam3-demo
     user: sam3-demo-usr
