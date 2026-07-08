@@ -14,6 +14,10 @@ export HSA_OVERRIDE_GFX_VERSION=11.5.1
 export PYTORCH_ALLOC_CONF=expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:512
 export MIGRAPHX_GPU_HIP_FLAGS="-Wno-error -Wno-lifetime-safety-intra-tu-suggestions"
 
+if [ -f ~/configs/cyclonedds.xml ]; then
+    export CYCLONEDDS_URI=~/configs/cyclonedds.xml
+fi
+
 SETUP_DIR=~/opennav_sam3_setup
 
 conda activate opennav-sam3-inference
