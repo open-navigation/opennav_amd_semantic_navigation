@@ -12,6 +12,7 @@ from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 configs_path = Path("/home/sam3-demo-usr/configs")  # Inside the Docker container
+camera_topic = '/camera/color/image_raw' 
 segmentation_topic = '/sam3_inference/segmentation_mask' 
 
 def generate_launch_description():
@@ -19,7 +20,7 @@ def generate_launch_description():
     orbbec_node_pkg = FindPackageShare('orbbec_camera')
 
     sam3_node_launch_args = [
-        ('image_topic', '/camera/color/image_raw'), 
+        ('image_topic', camera_topic), 
         ('sensor_processing_pipeline', 'false'),
         ('log_level', 'info')
     ]
