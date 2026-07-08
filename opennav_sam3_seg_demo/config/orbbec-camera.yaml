@@ -2,9 +2,9 @@
 ---
 # color
 enable_color: true
-color_width: 640
-color_height: 360
-color_fps: 6
+# color_width: 640
+# color_height: 360
+# color_fps: 6
 color.image_raw.enable_pub_plugins: ["image_transport/raw"]
 
 # depth
