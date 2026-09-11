@@ -20,8 +20,10 @@ Public API matches ``SAM3Live`` so ``demo_live.py``'s ``overlay`` /
 """
 from __future__ import annotations
 
-import os
-os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
+from .rocm_env import apply as _apply_rocm_env
+
+
+_apply_rocm_env()
 
 import time
 from pathlib import Path

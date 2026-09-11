@@ -41,8 +41,10 @@ Quick start
 """
 from __future__ import annotations
 
-import os
-os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "11.5.1")
+from .rocm_env import apply as _apply_rocm_env
+
+
+_apply_rocm_env()
 
 import time
 from pathlib import Path
@@ -285,7 +287,7 @@ class SAM3Live:
     # MIG patch wiring (mirrors demo_text.py)
     # ------------------------------------------------------------------
     def _apply_mig_patches(self, onnx_dir: Path, imgsz: int) -> None:
-        from .tracker import MIGraphXBackbone
+        from .migraphx_runtime import MIGraphXBackbone
         from .mig_vision_encoder import patch_sam3_video_model_with_mig
 
         det_dir = onnx_dir / "backbone_detector"
@@ -294,6 +296,7 @@ class SAM3Live:
         mxr = MIGraphXBackbone(
             onnx_path=det_dir / "single_simplified.onnx",
             cache_path=det_dir / "tuned.mxr",
+            gpu_io_cache_path=det_dir / "tuned_gpuio.mxr",
         )
         mxr.warmup(n=2)
         patch_sam3_video_model_with_mig(self.model, mxr)
