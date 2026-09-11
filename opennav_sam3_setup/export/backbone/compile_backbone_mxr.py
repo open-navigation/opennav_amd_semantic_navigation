@@ -8,19 +8,19 @@ session; the GPU-I/O artifact is additive and never overwrites tuned.mxr.
 
 Autotuning runs ~3 minutes for 504px and ~9 minutes for 1008px the first
 time; the resulting .mxr is hardware-specific (gfx1151) and locked to the
-MIGraphX build that produced it (currently 2.15+patches.20260511).
+MIGraphX 2.17 build that produced it.
 
-Requires PYTHONPATH=/opt/rocm-7.2.x/lib so the patched migraphx Python
-binding loads. The wrapping setup.sh sets this; if running standalone:
+The Conda activation hook installed by setup.sh selects the published
+MIGraphX binary prefix. Activate that environment before running standalone.
 
-    PYTHONPATH=/opt/rocm-7.2.x/lib${PYTHONPATH:+:$PYTHONPATH} \\
-        python export/backbone/compile_backbone_mxr.py --imgsz 504 --onnx-dir onnx_files_504
+    conda activate opennav-sam3-inference
+    python export/backbone/compile_backbone_mxr.py --imgsz 504 \\
+        --onnx-dir onnx_files_504
 """
 
 from __future__ import annotations
 import argparse
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -77,22 +77,8 @@ def main():
     # must be set explicitly. Does not affect non-attention ops.
     os.environ.setdefault("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", "attention")
 
-    # Defer the import: it touches the dynamic linker and prints whatever
-    # warning the patched library emits.
-    # MIGraphX Python binding lives in /opt/rocm-7.2.x/lib — add it if not
-    # already on sys.path (e.g. when invoked as a subprocess without PYTHONPATH).
-    import glob as _g
-    _rocm_path = os.environ.get("ROCM_PATH", "").rstrip("/")
-    _mxr_lib = (
-        (_rocm_path + "/lib")
-        if _rocm_path and os.path.isdir(_rocm_path + "/lib")
-        else next(
-            (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
-             if os.path.isdir(p)), "/opt/rocm-7.2.0/lib"
-        )
-    )
-    if _mxr_lib not in sys.path:
-        sys.path.insert(0, _mxr_lib)
+    # Defer the import until after compile-specific environment flags are set.
+    # setup.sh's Conda activation hook supplies the binary prefix.
     import migraphx
 
     print(f"migraphx from: {migraphx.__file__}")
@@ -145,8 +131,8 @@ def main():
         print(f"  fpn_{i}: shape={a.shape} C_contiguous={c}")
     if not all_ok:
         raise SystemExit(
-            "Outputs are NOT C-contiguous — patched MIGraphX (NHWC fix) is "
-            "not in effect. Reinstall via tools/install_migraphx_patched.sh."
+            "Outputs are NOT C-contiguous; verify the published MIGraphX 2.17 "
+            "runtime prefix is active."
         )
     print("  OK — all outputs C-contiguous")
 
