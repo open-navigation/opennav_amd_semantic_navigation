@@ -17,12 +17,10 @@
 
 from __future__ import annotations
 
-import glob
-import os
-import sys
-import time
 from collections import deque
+import os
 from pathlib import Path
+import time
 
 import cv2
 import numpy as np
@@ -31,40 +29,11 @@ from .rocm_env import apply as _apply_rocm_env
 
 
 _apply_rocm_env()
-os.environ.setdefault("MIGRAPHX_SKIP_BENCHMARKING", "1")
-
-# Keep the existing OpenNav development build as a compatibility fallback.
-# Packaged runtimes can select a different binding through PYTHONPATH or
-# MIGRAPHX_BUILD_LIB.
-_MXR_BUILD_LIB = os.environ.get(
-    "MIGRAPHX_BUILD_LIB",
-    "/home/amd/project/tools/AMDMIGraphX/build_docker/lib",
-)
+os.environ.setdefault('MIGRAPHX_SKIP_BENCHMARKING', '1')
 
 
 def _load_migraphx_module():
-    """Import the MIGraphX Python binding selected by the host environment."""
-    rocm_path = os.environ.get("ROCM_PATH", "").rstrip("/")
-    rocm_lib = (
-        f"{rocm_path}/lib"
-        if rocm_path and os.path.isdir(f"{rocm_path}/lib")
-        else next(
-            (
-                path
-                for path in sorted(glob.glob("/opt/rocm-7.2.*/lib"), reverse=True)
-                if os.path.isdir(path)
-            ),
-            "/opt/rocm-7.2.0/lib",
-        )
-    )
-    if rocm_lib not in sys.path:
-        sys.path.insert(0, rocm_lib)
-    if (
-        _MXR_BUILD_LIB
-        and os.path.isdir(_MXR_BUILD_LIB)
-        and _MXR_BUILD_LIB not in sys.path
-    ):
-        sys.path.append(_MXR_BUILD_LIB)
+    """Import MIGraphX from the explicitly configured binary prefix."""
     import migraphx
 
     return migraphx
@@ -78,7 +47,7 @@ class MIGraphXSession:
         onnx_path: str | Path,
         cache_path: str | Path,
         fp16: bool = True,
-        label: str = "MIGraphX session",
+        label: str = 'MIGraphX session',
     ) -> None:
         mxr = _load_migraphx_module()
         self._mxr = mxr
@@ -87,23 +56,23 @@ class MIGraphXSession:
         onnx_path = Path(onnx_path)
 
         if cache_path.exists():
-            print(f"  {label}: loading {cache_path.name} ...")
+            print(f'  {label}: loading {cache_path.name} ...')
             start = time.perf_counter()
             self._prog = mxr.load(str(cache_path))
-            print(f"  {label}: ready in {time.perf_counter() - start:.1f}s")
+            print(f'  {label}: ready in {time.perf_counter() - start:.1f}s')
         elif onnx_path.exists():
-            print(f"  {label}: compiling {onnx_path.name} ...")
+            print(f'  {label}: compiling {onnx_path.name} ...')
             start = time.perf_counter()
             program = mxr.parse_onnx(str(onnx_path))
             if fp16:
                 mxr.quantize_fp16(program)
-            program.compile(mxr.get_target("gpu"), offload_copy=True)
-            print(f"  {label}: compiled in {time.perf_counter() - start:.1f}s")
+            program.compile(mxr.get_target('gpu'), offload_copy=True)
+            print(f'  {label}: compiled in {time.perf_counter() - start:.1f}s')
             mxr.save(program, str(cache_path))
             self._prog = program
         else:
             raise FileNotFoundError(
-                f"Neither {cache_path} nor {onnx_path} found"
+                f'Neither {cache_path} nor {onnx_path} found'
             )
 
         self._in_names = self._prog.get_parameter_names()
@@ -118,11 +87,12 @@ class MIGraphXSession:
 
     def get_providers(self) -> list:
         """Return an ORT-compatible provider list."""
-        return ["MIGraphXExecutionProvider"]
+        return ['MIGraphXExecutionProvider']
 
 
 class MIGraphXBackbone:
-    """Run the precompiled SAM3 vision encoder with MIGraphX.
+    """
+    Run the precompiled SAM3 vision encoder with MIGraphX.
 
     A ``tuned_gpuio.mxr`` cache is selected only when explicitly provided and
     present. Otherwise the existing host-I/O ``tuned.mxr`` path is unchanged.
@@ -150,53 +120,53 @@ class MIGraphXBackbone:
         self.gpu_io = gpu_io_cache_path is not None and load_path == gpu_io_cache_path
 
         if load_path.exists():
-            mode = " GPU-I/O" if self.gpu_io else ""
-            print(f"  MIGraphX backbone{mode}: loading {load_path.name} ...")
+            mode = ' GPU-I/O' if self.gpu_io else ''
+            print(f'  MIGraphX backbone{mode}: loading {load_path.name} ...')
             start = time.perf_counter()
             self._prog = mxr.load(str(load_path))
             print(
-                f"  MIGraphX backbone{mode}: ready in "
-                f"{time.perf_counter() - start:.1f}s"
+                f'  MIGraphX backbone{mode}: ready in '
+                f'{time.perf_counter() - start:.1f}s'
             )
         elif onnx_path.exists():
             print(
-                f"  MIGraphX backbone: compiling {onnx_path.name} "
-                "with autotuning (~3 min) ..."
+                f'  MIGraphX backbone: compiling {onnx_path.name} '
+                'with autotuning (~3 min) ...'
             )
             start = time.perf_counter()
-            old_skip = os.environ.pop("MIGRAPHX_SKIP_BENCHMARKING", None)
+            old_skip = os.environ.pop('MIGRAPHX_SKIP_BENCHMARKING', None)
             try:
                 program = mxr.parse_onnx(str(onnx_path))
                 mxr.quantize_fp16(program)
-                program.compile(mxr.get_target("gpu"), offload_copy=True)
+                program.compile(mxr.get_target('gpu'), offload_copy=True)
             finally:
                 if old_skip is not None:
-                    os.environ["MIGRAPHX_SKIP_BENCHMARKING"] = old_skip
+                    os.environ['MIGRAPHX_SKIP_BENCHMARKING'] = old_skip
             print(
-                f"  MIGraphX backbone: compiled in "
-                f"{time.perf_counter() - start:.1f}s"
+                f'  MIGraphX backbone: compiled in '
+                f'{time.perf_counter() - start:.1f}s'
             )
             mxr.save(program, str(cache_path))
-            print(f"  MIGraphX backbone: cache saved -> {cache_path}")
+            print(f'  MIGraphX backbone: cache saved -> {cache_path}')
             self._prog = program
         else:
             raise FileNotFoundError(
-                f"MIGraphX backbone needs {cache_path} (pre-compiled) "
-                f"or {onnx_path} (to compile from scratch); neither found."
+                f'MIGraphX backbone needs {cache_path} (pre-compiled) '
+                f'or {onnx_path} (to compile from scratch); neither found.'
             )
 
         self._gpu_output_names = sorted(
             (
                 name
                 for name in self._prog.get_parameter_names()
-                if "#output_" in name
+                if '#output_' in name
             ),
-            key=lambda name: int(name.rsplit("_", 1)[1]),
+            key=lambda name: int(name.rsplit('_', 1)[1]),
         )
         if self.gpu_io and not self._gpu_output_names:
             raise RuntimeError(
-                f"{load_path} has no GPU output parameters; rebuild it with "
-                "compile_backbone_mxr.py --gpu-io"
+                f'{load_path} has no GPU output parameters; rebuild it with '
+                'compile_backbone_mxr.py --gpu-io'
             )
         self._gpu_io_poisoned = False
         self._failed_run_keepalives = []
@@ -219,30 +189,30 @@ class MIGraphXBackbone:
             import torch
 
             shape = list(
-                self._prog.get_parameter_shapes()["pixel_values"].lens()
+                self._prog.get_parameter_shapes()['pixel_values'].lens()
             )
-            data = torch.randn(*shape, device="cuda", dtype=torch.float32)
+            data = torch.randn(*shape, device='cuda', dtype=torch.float32)
             for _ in range(n):
                 self.run_torch(data)
             return
 
-        shape = list(self._prog.get_parameter_shapes()["pixel_values"].lens())
+        shape = list(self._prog.get_parameter_shapes()['pixel_values'].lens())
         data = np.random.randn(*shape).astype(np.float32)
         argument = self._mxr.argument(data)
         for _ in range(n):
-            self._prog.run({"pixel_values": argument})
+            self._prog.run({'pixel_values': argument})
 
     def __call__(self, img_np: np.ndarray):
         """Run a host-I/O program and return at least four NumPy outputs."""
         if self.gpu_io:
             raise RuntimeError(
-                "This backbone uses GPU-resident I/O; call run_torch() with a "
-                "Torch CUDA/HIP tensor."
+                'This backbone uses GPU-resident I/O; call run_torch() with a '
+                'Torch CUDA/HIP tensor.'
             )
 
         img_contiguous = np.ascontiguousarray(img_np)
         argument = self._mxr.argument(img_contiguous)
-        outputs = self._prog.run({"pixel_values": argument})
+        outputs = self._prog.run({'pixel_values': argument})
         arrays = [np.array(output) for output in outputs]
         if arrays and not arrays[0].flags.c_contiguous:
             arrays = [np.ascontiguousarray(array) for array in arrays]
@@ -253,33 +223,33 @@ class MIGraphXBackbone:
     def run_torch(self, pixel_values):
         """Run a GPU-I/O program synchronously on Torch CUDA/HIP allocations."""
         if not self.gpu_io:
-            raise RuntimeError("run_torch() requires a tuned_gpuio.mxr program")
+            raise RuntimeError('run_torch() requires a tuned_gpuio.mxr program')
         if self._gpu_io_poisoned:
             raise RuntimeError(
-                "GPU-I/O backbone is unusable after a failed device drain"
+                'GPU-I/O backbone is unusable after a failed device drain'
             )
 
         import torch
 
-        if pixel_values.device.type != "cuda":
+        if pixel_values.device.type != 'cuda':
             raise ValueError(
-                "GPU-resident backbone requires a CUDA/HIP tensor, got "
-                f"{pixel_values.device}"
+                'GPU-resident backbone requires a CUDA/HIP tensor, got '
+                f'{pixel_values.device}'
             )
         input_tensor = pixel_values.detach().to(
             dtype=torch.float32
         ).contiguous()
 
         mgx_to_torch = {
-            "bool_type": torch.bool,
-            "uint8_type": torch.uint8,
-            "int8_type": torch.int8,
-            "int16_type": torch.int16,
-            "int32_type": torch.int32,
-            "int64_type": torch.int64,
-            "half_type": torch.float16,
-            "float_type": torch.float32,
-            "double_type": torch.float64,
+            'bool_type': torch.bool,
+            'uint8_type': torch.uint8,
+            'int8_type': torch.int8,
+            'int16_type': torch.int16,
+            'int32_type': torch.int32,
+            'int64_type': torch.int64,
+            'half_type': torch.float16,
+            'float_type': torch.float32,
+            'double_type': torch.float64,
         }
         torch_to_mgx = {value: key for key, value in mgx_to_torch.items()}
 
@@ -291,7 +261,7 @@ class MIGraphXBackbone:
             )
             return self._mxr.argument_from_pointer(shape, tensor.data_ptr())
 
-        args = {"pixel_values": to_argument(input_tensor)}
+        args = {'pixel_values': to_argument(input_tensor)}
         outputs = []
         parameter_shapes = self._prog.get_parameter_shapes()
         for name in self._gpu_output_names:
@@ -308,7 +278,7 @@ class MIGraphXBackbone:
         keepalive = (input_tensor, args, outputs)
         stream = torch.cuda.current_stream(device=pixel_values.device)
         try:
-            self._prog.run_async(args, stream.cuda_stream, "ihipStream_t")
+            self._prog.run_async(args, stream.cuda_stream, 'ihipStream_t')
             torch.cuda.synchronize(device=pixel_values.device)
         except BaseException:
             self._drain_failed_run(keepalive, pixel_values.device)
@@ -340,8 +310,8 @@ def retarget_resolution(model, new_imgsz: int) -> None:
     model.config.image_size = new_imgsz
     model.config.memory_attention_rope_feat_sizes = [new_height, new_height]
     model.image_size = new_imgsz
-    prompt_encoder = getattr(model, "prompt_encoder", None) or getattr(
-        getattr(model, "tracker_model", None), "prompt_encoder", None
+    prompt_encoder = getattr(model, 'prompt_encoder', None) or getattr(
+        getattr(model, 'tracker_model', None), 'prompt_encoder', None
     )
     if prompt_encoder is not None:
         prompt_encoder.image_embedding_size = (new_height, new_height)
@@ -349,9 +319,9 @@ def retarget_resolution(model, new_imgsz: int) -> None:
         prompt_encoder.input_image_size = new_imgsz
 
     for _, module in model.named_modules():
-        device = getattr(module, "rope_embeddings_cos", torch.tensor(0)).device
+        device = getattr(module, 'rope_embeddings_cos', torch.tensor(0)).device
         dtype = getattr(
-            module, "rope_embeddings_cos", torch.tensor(0.0)
+            module, 'rope_embeddings_cos', torch.tensor(0.0)
         ).dtype
         if isinstance(module, Sam3ViTRotaryEmbedding) and module.end_x > new_height:
             module.end_x = module.end_y = new_height
@@ -365,7 +335,7 @@ def retarget_resolution(model, new_imgsz: int) -> None:
             flat = torch.arange(new_height * new_height, dtype=torch.long)
             x_positions = (flat % new_height).float() * module.scale
             y_positions = torch.div(
-                flat, new_height, rounding_mode="floor"
+                flat, new_height, rounding_mode='floor'
             ).float() * module.scale
             inverse = torch.cat(
                 [
@@ -375,12 +345,12 @@ def retarget_resolution(model, new_imgsz: int) -> None:
                 dim=-1,
             ).repeat_interleave(2, dim=-1)
             module.register_buffer(
-                "rope_embeddings_cos",
+                'rope_embeddings_cos',
                 inverse.cos().to(device, dtype),
                 persistent=False,
             )
             module.register_buffer(
-                "rope_embeddings_sin",
+                'rope_embeddings_sin',
                 inverse.sin().to(device, dtype),
                 persistent=False,
             )
@@ -388,12 +358,12 @@ def retarget_resolution(model, new_imgsz: int) -> None:
             module.end_x = module.end_y = new_height
             inverse = module.create_inv_freq()
             module.register_buffer(
-                "rope_embeddings_cos",
+                'rope_embeddings_cos',
                 inverse.cos().to(device, dtype),
                 persistent=False,
             )
             module.register_buffer(
-                "rope_embeddings_sin",
+                'rope_embeddings_sin',
                 inverse.sin().to(device, dtype),
                 persistent=False,
             )
@@ -444,9 +414,9 @@ class MemoryBank:
 
 
 __all__ = [
-    "MIGraphXBackbone",
-    "MIGraphXSession",
-    "MemoryBank",
-    "preprocess_image",
-    "retarget_resolution",
+    'MIGraphXBackbone',
+    'MIGraphXSession',
+    'MemoryBank',
+    'preprocess_image',
+    'retarget_resolution',
 ]
