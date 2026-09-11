@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +30,15 @@ def gpu_runtime():
         ),
         ort_gpu_io=pytest.importorskip(
             'opennav_sam3_inference.tracker.ort_gpu_io'
+        ),
+        parallel_video=pytest.importorskip(
+            'opennav_sam3_inference.tracker.parallel_video'
+        ),
+        live_inference=pytest.importorskip(
+            'opennav_sam3_inference.tracker.live_inference'
+        ),
+        hybrid_inference=pytest.importorskip(
+            'opennav_sam3_inference.tracker.hybrid_inference'
         ),
     )
 
@@ -140,3 +150,102 @@ def test_gpu_io_execution_failure_is_not_safe_fallback(gpu_runtime, monkeypatch)
         )
 
     assert len(synchronized) == 1
+
+
+def test_gpu_io_input_fence_is_scoped(gpu_runtime, monkeypatch):
+    ort_gpu_io = gpu_runtime.ort_gpu_io
+    synchronized = []
+    fake_stream = SimpleNamespace(
+        synchronize=lambda: synchronized.append('input')
+    )
+    fake_torch = SimpleNamespace(
+        float32=object(),
+        empty=lambda *_args, **_kwargs: _FakeTensor(),
+        cuda=SimpleNamespace(
+            current_device=lambda: 0,
+            current_stream=lambda **_kwargs: fake_stream,
+            synchronize=lambda **_kwargs: synchronized.append('device'),
+        ),
+    )
+    monkeypatch.setattr(ort_gpu_io, 'torch', fake_torch)
+    session = SimpleNamespace(
+        io_binding=lambda: _FakeBinding(),
+        run_with_iobinding=lambda _binding: None,
+    )
+
+    ort_gpu_io.run_float32_gpu(
+        session, {'input': _FakeTensor()}, 'output', (1,)
+    )
+    with ort_gpu_io.fence_ort_inputs():
+        ort_gpu_io.run_float32_gpu(
+            session, {'input': _FakeTensor()}, 'output', (1,)
+        )
+    ort_gpu_io.run_float32_gpu(
+        session, {'input': _FakeTensor()}, 'output', (1,)
+    )
+
+    assert synchronized == ['input']
+
+
+def test_parallel_tail_policy_defaults_to_mig_auto_mode(gpu_runtime):
+    live_inference = gpu_runtime.live_inference
+    hybrid_inference = gpu_runtime.hybrid_inference
+    assert (
+        inspect.signature(live_inference.SAM3Live).parameters[
+            'parallel_tail'
+        ].default
+        is None
+    )
+    assert (
+        inspect.signature(hybrid_inference.SAM3HybridLive).parameters[
+            'parallel_tail'
+        ].default
+        is None
+    )
+
+
+def test_parallel_tail_reset_clears_failed_session(gpu_runtime):
+    live_inference = gpu_runtime.live_inference
+    calls = []
+    session = SimpleNamespace(
+        _parallel_tail_failed=True,
+        processed_frames={3: object()},
+        reset_inference_session=lambda: calls.append('reset'),
+    )
+    live = live_inference.SAM3Live.__new__(live_inference.SAM3Live)
+    live.session = session
+    live.parallel_tail = True
+    live._next_frame_idx = 3
+    live._force_detect_next = False
+
+    live.reset_tracking()
+
+    assert calls == ['reset']
+    assert session._parallel_tail_failed is False
+    assert session.processed_frames == {}
+    assert live._next_frame_idx == 0
+    assert live._force_detect_next is True
+
+
+def test_parallel_tail_close_is_forwarded(gpu_runtime, monkeypatch):
+    parallel_video = gpu_runtime.parallel_video
+    live_inference = gpu_runtime.live_inference
+    hybrid_inference = gpu_runtime.hybrid_inference
+    closed = []
+    model = SimpleNamespace(_parallel_tail_runtime=object())
+    monkeypatch.setattr(
+        parallel_video,
+        'close_parallel_video_tail',
+        lambda value: closed.append(value),
+    )
+    live = live_inference.SAM3Live.__new__(live_inference.SAM3Live)
+    live.model = model
+
+    live.close()
+    hybrid = hybrid_inference.SAM3HybridLive.__new__(
+        hybrid_inference.SAM3HybridLive
+    )
+    hybrid.live = SimpleNamespace(close=lambda: closed.append('hybrid'))
+    hybrid.close()
+
+    assert closed == [model, 'hybrid']
