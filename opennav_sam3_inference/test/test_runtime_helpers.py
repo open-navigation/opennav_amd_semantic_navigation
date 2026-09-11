@@ -45,7 +45,7 @@ def gpu_runtime():
 
 class _FakeProgram:
     def get_parameter_names(self):
-        return ["pixel_values", "#output_1", "#output_0"]
+        return ['pixel_values', '#output_1', '#output_0']
 
 
 class _FakeMigraphx:
@@ -61,20 +61,20 @@ def test_backbone_prefers_gpu_io_cache(gpu_runtime, monkeypatch, tmp_path):
     migraphx_runtime = gpu_runtime.migraphx_runtime
     fake_migraphx = _FakeMigraphx()
     monkeypatch.setattr(
-        migraphx_runtime, "_load_migraphx_module", lambda: fake_migraphx
+        migraphx_runtime, '_load_migraphx_module', lambda: fake_migraphx
     )
-    host_cache = tmp_path / "tuned.mxr"
-    gpu_cache = tmp_path / "tuned_gpuio.mxr"
+    host_cache = tmp_path / 'tuned.mxr'
+    gpu_cache = tmp_path / 'tuned_gpuio.mxr'
     host_cache.touch()
     gpu_cache.touch()
 
     backbone = migraphx_runtime.MIGraphXBackbone(
-        tmp_path / "model.onnx", host_cache, gpu_cache
+        tmp_path / 'model.onnx', host_cache, gpu_cache
     )
 
     assert backbone.gpu_io
     assert fake_migraphx.loaded == [str(gpu_cache)]
-    assert backbone._gpu_output_names == ["#output_0", "#output_1"]
+    assert backbone._gpu_output_names == ['#output_0', '#output_1']
 
 
 def test_backbone_keeps_host_io_when_gpu_cache_is_missing(
@@ -83,13 +83,13 @@ def test_backbone_keeps_host_io_when_gpu_cache_is_missing(
     migraphx_runtime = gpu_runtime.migraphx_runtime
     fake_migraphx = _FakeMigraphx()
     monkeypatch.setattr(
-        migraphx_runtime, "_load_migraphx_module", lambda: fake_migraphx
+        migraphx_runtime, '_load_migraphx_module', lambda: fake_migraphx
     )
-    host_cache = tmp_path / "tuned.mxr"
+    host_cache = tmp_path / 'tuned.mxr'
     host_cache.touch()
 
     backbone = migraphx_runtime.MIGraphXBackbone(
-        tmp_path / "model.onnx", host_cache, tmp_path / "missing.mxr"
+        tmp_path / 'model.onnx', host_cache, tmp_path / 'missing.mxr'
     )
 
     assert not backbone.gpu_io
@@ -98,7 +98,7 @@ def test_backbone_keeps_host_io_when_gpu_cache_is_missing(
 
 class _FakeTensor:
     def __init__(self):
-        self.device = SimpleNamespace(type="cuda", index=0)
+        self.device = SimpleNamespace(type='cuda', index=0)
         self.shape = (1,)
 
     def detach(self):
@@ -133,20 +133,20 @@ def test_gpu_io_execution_failure_is_not_safe_fallback(gpu_runtime, monkeypatch)
         empty=lambda *_args, **_kwargs: _FakeTensor(),
         cuda=SimpleNamespace(
             current_device=lambda: 0,
-            synchronize=lambda **kwargs: synchronized.append(kwargs["device"]),
+            synchronize=lambda **kwargs: synchronized.append(kwargs['device']),
         ),
     )
-    monkeypatch.setattr(ort_gpu_io, "torch", fake_torch)
+    monkeypatch.setattr(ort_gpu_io, 'torch', fake_torch)
     session = SimpleNamespace(
         io_binding=lambda: _FakeBinding(),
         run_with_iobinding=lambda _binding: (_ for _ in ()).throw(
-            RuntimeError("submitted")
+            RuntimeError('submitted')
         ),
     )
 
     with pytest.raises(ort_gpu_io.GpuIoExecutionError):
         ort_gpu_io.run_float32_gpu(
-            session, {"input": _FakeTensor()}, "output", (1,)
+            session, {'input': _FakeTensor()}, 'output', (1,)
         )
 
     assert len(synchronized) == 1
@@ -204,27 +204,66 @@ def test_parallel_tail_policy_defaults_to_mig_auto_mode(gpu_runtime):
     )
 
 
-def test_parallel_tail_reset_clears_failed_session(gpu_runtime):
+def test_parallel_tail_reset_replaces_failed_session(gpu_runtime):
     live_inference = gpu_runtime.live_inference
-    calls = []
-    session = SimpleNamespace(
+    prompt_embedding = object()
+    old_frame = object()
+    old_session = SimpleNamespace(
         _parallel_tail_failed=True,
-        processed_frames={3: object()},
-        reset_inference_session=lambda: calls.append('reset'),
+        processed_frames={3: old_frame},
+        prompts={7: 'obstacle'},
+        prompt_input_ids={7: object()},
+        prompt_embeddings={7: prompt_embedding},
+        prompt_attention_masks={7: object()},
     )
+    replacement = SimpleNamespace(
+        _parallel_tail_failed=True,
+        processed_frames={},
+        prompts={},
+        prompt_input_ids={},
+        prompt_embeddings={},
+        prompt_attention_masks={},
+    )
+    init_calls = []
+
+    def init_video_session(**kwargs):
+        init_calls.append(kwargs)
+        return replacement
+
     live = live_inference.SAM3Live.__new__(live_inference.SAM3Live)
-    live.session = session
+    live.processor = SimpleNamespace(init_video_session=init_video_session)
+    live.device = SimpleNamespace(type='cpu')
+    live.dtype = object()
+    live.max_vision_features_cache_size = 2
+    live.model = SimpleNamespace(_skip_detection=True)
+    live.session = old_session
     live.parallel_tail = True
     live._next_frame_idx = 3
+    live._infer_calls = 4
     live._force_detect_next = False
+    live._detector_call_counter = 5
 
     live.reset_tracking()
 
-    assert calls == ['reset']
-    assert session._parallel_tail_failed is False
-    assert session.processed_frames == {}
+    assert len(init_calls) == 1
+    assert init_calls[0]['video'] is None
+    assert init_calls[0]['inference_device'] is live.device
+    assert init_calls[0]['dtype'] is live.dtype
+    assert init_calls[0]['max_vision_features_cache_size'] == 2
+    assert live.session is replacement
+    assert live.session is not old_session
+    assert replacement.processed_frames == {}
+    assert replacement.prompts == old_session.prompts
+    assert replacement.prompts is not old_session.prompts
+    assert replacement.prompt_embeddings[7] is prompt_embedding
+    assert replacement._parallel_tail_failed is False
+    assert old_session._parallel_tail_failed is True
+    assert old_session.processed_frames == {3: old_frame}
     assert live._next_frame_idx == 0
+    assert live._infer_calls == 0
     assert live._force_detect_next is True
+    assert live._detector_call_counter == 0
+    assert live.model._skip_detection is False
 
 
 def test_parallel_tail_close_is_forwarded(gpu_runtime, monkeypatch):
