@@ -90,6 +90,7 @@ class SAM3HybridLive:
         device: str | torch.device | None = None,
         mig: bool = True,
         parallel_tail: bool | None = None,
+        fixed_detr_decoder: bool = False,
         redetect_interval_ms: float = 1000.0,
         max_objects_per_prompt: int | dict[str, int] | None = 5,
         iou_assoc_threshold: float = 0.3,
@@ -122,6 +123,8 @@ class SAM3HybridLive:
             parallel_tail: overlap detector/tracker work on SAM3 keyframes.
                 ``None`` (default) enables it with MIG; pass ``False`` for a
                 serial diagnostic fallback.
+            fixed_detr_decoder: use the direct-MXR fixed 504px DETR decoder.
+                Disabled by default because it requires ``bootstrap_frames=0``.
         """
         self.imgsz = imgsz
         self.onnx_dir = Path(onnx_dir)
@@ -140,6 +143,7 @@ class SAM3HybridLive:
             device=device,
             mig=mig,
             parallel_tail=parallel_tail,
+            fixed_detr_decoder=fixed_detr_decoder,
             redetect_every=1,
             max_objects_per_prompt=max_objects_per_prompt,
             max_vision_features_cache_size=max_vision_features_cache_size,

@@ -86,6 +86,7 @@ class SAM3Live:
         device: str | torch.device | None = None,
         mig: bool = False,
         parallel_tail: bool | None = None,
+        fixed_detr_decoder: bool = False,
         max_vision_features_cache_size: int = 1,
         keep_recent_frames: int = 0,
         redetect_every: int = 1,
@@ -107,6 +108,8 @@ class SAM3Live:
             parallel_tail: overlap the detector and tracker branches on two HIP
                 streams after their shared backbone. ``None`` (default) enables
                 it with MIG; pass ``False`` for a serial diagnostic fallback.
+            fixed_detr_decoder: use the direct-MXR fixed 504px DETR decoder.
+                Disabled by default because it requires ``bootstrap_frames=0``.
             max_vision_features_cache_size: HF vision-feature LRU size. Default 1
                 — only keeps the most recent frame's features.
             keep_recent_frames: bound on number of past raw frame tensors kept
@@ -169,6 +172,11 @@ class SAM3Live:
         if parallel_tail and not mig:
             raise ValueError("parallel_tail=True requires mig=True")
         self.parallel_tail = bool(parallel_tail)
+        if fixed_detr_decoder and not mig:
+            raise ValueError("fixed_detr_decoder=True requires mig=True")
+        if fixed_detr_decoder and imgsz != 504:
+            raise ValueError("fixed_detr_decoder currently requires imgsz=504")
+        self.fixed_detr_decoder = bool(fixed_detr_decoder)
         # Force full detection on next infer() (frame 0, or first after reset).
         self._force_detect_next = True
         # Monotonic count of calls to infer() — drives the redetect schedule.
@@ -180,6 +188,11 @@ class SAM3Live:
         # CxCyWH normalized [0,1] format (matches Sam3GeometryEncoder input).
         self.bootstrap_frames = max(0, int(bootstrap_frames))
         self.bootstrap_min_score = float(bootstrap_min_score)
+        if self.fixed_detr_decoder and self.bootstrap_frames > 0:
+            raise ValueError(
+                "fixed DETR decoder requires a 32-token prompt contract and "
+                "cannot be combined with bootstrap_frames > 0"
+            )
         self._bootstrap_remaining: dict[int, int] = {}
         # During bootstrap: per-prompt accumulator of high-conf pred_boxes.
         # After bootstrap done: per-prompt stored exemplar boxes (tensor).
@@ -323,6 +336,29 @@ class SAM3Live:
             print(f"  detr_encoder MIG ready")
         else:
             print(f"  (skip detr_encoder MIG: {detr_onnx} not found)")
+
+        if self.fixed_detr_decoder:
+            fixed_decoder_mxr = (
+                onnx_dir / "detr_decoder_fixed" / "direct_gpuio.mxr"
+            )
+            if not fixed_decoder_mxr.is_file():
+                raise FileNotFoundError(
+                    "fixed DETR decoder artifact not found: "
+                    f"{fixed_decoder_mxr}"
+                )
+            from .mig_detr_decoder import MIGFixedDetrDecoder
+
+            original_decoder = self.model.detector_model.detr_decoder
+            fixed_decoder = MIGFixedDetrDecoder(
+                fixed_decoder_mxr,
+                original_decoder,
+            )
+            self.model.detector_model.detr_decoder = fixed_decoder
+            self._fixed_detr_decoder = fixed_decoder
+            print(
+                "  fixed DETR decoder direct-MXR enabled "
+                f"({fixed_decoder_mxr.name})"
+            )
 
         # K is resolution-dependent (MLIR attention perf cliff).
         k = _K_PER_IMGSZ.get(imgsz, 32)

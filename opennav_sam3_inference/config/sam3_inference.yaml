@@ -29,6 +29,6 @@ sam3_inference:
     queue_depth: 5
     start_enabled: true
     cpu_threads: 1  # cap torch/cv2 thread pools (see sam3_node.py); raise if CPU profiling shows starvation
-    bootstrap_frames: 5
+    bootstrap_frames: 0
     bootstrap_min_score: 0.3
     periodic_rebootstrap_seconds: 180.0
