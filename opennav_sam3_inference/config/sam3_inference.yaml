@@ -32,3 +32,5 @@ sam3_inference:
     bootstrap_frames: 5
     bootstrap_min_score: 0.3
     periodic_rebootstrap_seconds: 180.0
+    # Fixed decoder requires imgsz=504, MIG, and bootstrap_frames=0.
+    fixed_detr_decoder: false

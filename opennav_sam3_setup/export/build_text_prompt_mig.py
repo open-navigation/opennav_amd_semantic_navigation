@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Build all MIG artefacts needed for `demo_text.py --mig` in one command.
 
-Runs the full 5-step export pipeline for the text-prompt MIG path:
+Runs the text-prompt MIG export pipeline:
   1. export_backbone_single   — ViT backbone ONNX (FP32, 4 FPN + last_hidden_state)
   2. simplify_backbone        — onnxsim graph simplification
   3. compile_backbone_mxr     — MIGraphX kernel autotune → tuned.mxr  (~12 min @1008)
   4. export_detr_encoder      — DETR encoder ONNX + onnxsim
   5. export_memory_attention_padded — padded memory_attention ONNX (ORT MIG EP)
+  6. export_fixed_detr_decoder — fixed 504px decoder ONNX
+  7. compile_fixed_detr_decoder — direct-I/O decoder MXR + checksum
 
 Each step skips if its output file already exists (use --force to rebuild).
 
@@ -46,7 +48,8 @@ def parse_args():
     p.add_argument("--force", action="store_true",
                    help="Rebuild even if output files already exist")
     p.add_argument("--steps", nargs="+",
-                   choices=["backbone", "detr_encoder", "memory_attention", "all"],
+                   choices=["backbone", "detr_encoder", "memory_attention",
+                            "fixed_decoder", "all"],
                    default=["all"],
                    help="Which steps to run (default: all)")
     p.add_argument("--ptr-tokens", type=int, default=None,
@@ -98,6 +101,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
     det_dir = onnx_dir / "backbone_detector"
     mod_dir = onnx_dir / "detector_modules"
     trk_dir = onnx_dir / "tracker_modules"
+    fixed_dir = onnx_dir / "detr_decoder_fixed"
 
     steps = set(args.steps)
     run_all = "all" in steps
@@ -149,7 +153,6 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--checkpoint", str(args.checkpoint),
-                "--text-seq-len", str(64),
             ], f"[4/5] Export DETR encoder @{imgsz}px")
 
     # ── Step 5: export memory_attention ──────────────────────────────────
@@ -167,6 +170,33 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--ptr-tokens", str(ptr_tokens),
                 "--checkpoint", str(args.checkpoint),
             ], f"[5/5] Export memory_attention (S7_P{ptr_tokens}) @{imgsz}px")
+
+    if run_all or "fixed_decoder" in steps:
+        if imgsz != 504:
+            if "fixed_decoder" in steps:
+                print("  fixed decoder currently supports only 504px")
+                return False
+            print("  skip: fixed decoder currently supports only 504px")
+        else:
+            fixed_onnx = fixed_dir / "detr_decoder_fixed_simplified.onnx"
+            if not exists(fixed_onnx, "fixed decoder ONNX", args.force):
+                ok = ok and run([
+                    sys.executable,
+                    "export/detector/export_fixed_detr_decoder.py",
+                    "--checkpoint", str(args.checkpoint),
+                    "--output-dir", str(fixed_dir),
+                ], "[6/7] Export fixed DETR decoder")
+            fixed_mxr = fixed_dir / "direct_gpuio.mxr"
+            if not exists(fixed_mxr, "fixed decoder MXR", args.force):
+                command = [
+                    sys.executable,
+                    "export/detector/compile_fixed_detr_decoder.py",
+                    "--onnx", str(fixed_onnx),
+                    "--output", str(fixed_mxr),
+                ]
+                if args.force:
+                    command.append("--force")
+                ok = ok and run(command, "[7/7] Compile fixed DETR decoder MXR")
 
     return ok
 

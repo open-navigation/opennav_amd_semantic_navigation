@@ -80,6 +80,7 @@ class Sam3InferenceNode(Node):
         self.declare_parameter('bootstrap_frames', 5)
         self.declare_parameter('bootstrap_min_score', 0.3)
         self.declare_parameter('periodic_rebootstrap_seconds', 180.0)
+        self.declare_parameter('fixed_detr_decoder', False)
 
         checkpoint = self.get_parameter('checkpoint').value
         onnx_dir = self.get_parameter('onnx_dir').value
@@ -124,6 +125,9 @@ class Sam3InferenceNode(Node):
         _boot = int(self.get_parameter('bootstrap_frames').value)
         _boot_min = float(self.get_parameter('bootstrap_min_score').value)
         _periodic = float(self.get_parameter('periodic_rebootstrap_seconds').value)
+        _fixed_detr_decoder = bool(
+            self.get_parameter('fixed_detr_decoder').value
+        )
 
         if self._redetect_interval_ms <= 0.0:
             from opennav_sam3_inference.tracker.live_inference import SAM3Live
@@ -139,6 +143,7 @@ class Sam3InferenceNode(Node):
                 dtype=torch.float16,
                 device=device,
                 mig=True,
+                fixed_detr_decoder=_fixed_detr_decoder,
                 max_objects_per_prompt=max_objects,
                 redetect_every=1,
                 bootstrap_frames=_boot,
@@ -160,6 +165,7 @@ class Sam3InferenceNode(Node):
                 dtype=torch.float16,
                 device=device,
                 mig=True,
+                fixed_detr_decoder=_fixed_detr_decoder,
                 redetect_interval_ms=self._redetect_interval_ms,
                 max_objects_per_prompt=max_objects,
                 bootstrap_frames=_boot,
