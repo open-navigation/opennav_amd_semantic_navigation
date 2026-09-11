@@ -4,11 +4,12 @@
 Runs the text-prompt MIG export pipeline:
   1. export_backbone_single   — ViT backbone ONNX (FP32, 4 FPN + last_hidden_state)
   2. simplify_backbone        — onnxsim graph simplification
-  3. compile_backbone_mxr     — MIGraphX kernel autotune → tuned.mxr  (~12 min @1008)
-  4. export_detr_encoder      — DETR encoder ONNX + onnxsim
-  5. export_memory_attention_padded — padded memory_attention ONNX (ORT MIG EP)
-  6. export_fixed_detr_decoder — fixed 504px decoder ONNX
-  7. compile_fixed_detr_decoder — direct-I/O decoder MXR + checksum
+  3. compile_backbone_mxr     — host-I/O fallback → tuned.mxr
+  4. compile_backbone_mxr     — Torch GPU-I/O path → tuned_gpuio.mxr
+  5. export_detr_encoder      — DETR encoder ONNX + onnxsim
+  6. export_memory_attention_padded — S1..S10 memory-attention ONNX
+  7. export_fixed_detr_decoder — fixed 504px decoder ONNX
+  8. compile_fixed_detr_decoder — direct-I/O decoder MXR + checksum
 
 Each step skips if its output file already exists (use --force to rebuild).
 
@@ -25,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -56,17 +58,20 @@ def parse_args():
                    help="Pointer token slots for memory_attention. "
                         "Default: 64 at 504px, 48 at 1008px (highest safe K per kernel cliff). "
                         "Set explicitly to override.")
+    p.add_argument("--max-spatial-slots", type=int, default=10,
+                   help="Generate exact memory-attention shapes S1..N. Default 10 "
+                        "covers 7 non-conditioning plus up to 4 conditioning frames.")
     return p.parse_args()
 
 
-def run(cmd: list[str], label: str) -> bool:
+def run(cmd: list[str], label: str, *, env=None) -> bool:
     """Run a subprocess; return True on success."""
     print(f"\n{'─'*60}")
     print(f"  {label}")
     print(f"  $ {' '.join(str(c) for c in cmd)}")
     print(f"{'─'*60}")
     t0 = time.perf_counter()
-    result = subprocess.run(cmd, cwd=WORKSPACE)
+    result = subprocess.run(cmd, cwd=WORKSPACE, env=env)
     elapsed = time.perf_counter() - t0
     if result.returncode != 0:
         print(f"\n  ✗ FAILED after {elapsed:.0f}s (exit {result.returncode})")
@@ -109,6 +114,8 @@ def build_for_imgsz(imgsz: int, args) -> bool:
 
     # ── Step 1: export backbone ONNX ─────────────────────────────────────
     if run_all or "backbone" in steps:
+        sink_env = dict(os.environ)
+        sink_env["ROCMLIR_SINK_FINAL_ERF"] = "1"
         out = det_dir / "single_fp32.onnx"
         if not exists(out, "backbone ONNX", args.force):
             ok = ok and run([
@@ -118,7 +125,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
                 "--checkpoint", str(args.checkpoint),
-            ], f"[1/5] Export backbone ONNX @{imgsz}px")
+            ], f"[1/8] Export backbone ONNX @{imgsz}px")
 
         # ── Step 2: simplify backbone ─────────────────────────────────────
         out = det_dir / "single_simplified.onnx"
@@ -129,7 +136,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
-            ], f"[2/5] Simplify backbone @{imgsz}px")
+            ], f"[2/8] Simplify backbone @{imgsz}px")
 
         # ── Step 3: compile .mxr ─────────────────────────────────────────
         out = det_dir / "tuned.mxr"
@@ -141,7 +148,22 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--backbone-source", "detector",
                 "--skip-verify",
-            ], f"[3/5] Compile backbone .mxr @{imgsz}px  (~12 min at 1008px)")
+            ], f"[3/8] Compile backbone .mxr @{imgsz}px  (~12 min at 1008px)")
+
+        # Keep the host-I/O artifact as a portable fallback and compile a
+        # distinct GPU-resident artifact for the optimized text path.
+        gpu_io_out = det_dir / "tuned_gpuio.mxr"
+        if not exists(gpu_io_out, "tuned_gpuio.mxr", args.force):
+            ok = ok and run([
+                sys.executable,
+                "export/backbone/compile_backbone_mxr.py",
+                "--onnx-dir", str(onnx_dir),
+                "--imgsz", str(imgsz),
+                "--backbone-source", "detector",
+                "--gpu-io",
+                "--skip-verify",
+            ], f"[4/8] Compile FC1-sink GPU-I/O backbone .mxr @{imgsz}px",
+                env=sink_env)
 
     # ── Step 4: export DETR encoder ───────────────────────────────────────
     if run_all or "detr_encoder" in steps:
@@ -153,23 +175,26 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 "--onnx-dir", str(onnx_dir),
                 "--imgsz", str(imgsz),
                 "--checkpoint", str(args.checkpoint),
-            ], f"[4/5] Export DETR encoder @{imgsz}px")
+            ], f"[5/8] Export DETR encoder @{imgsz}px")
 
     # ── Step 5: export memory_attention ──────────────────────────────────
     if run_all or "memory_attention" in steps:
         # Resolve None default per imgsz (504→64, 1008→48 — kernel cliff aware)
         ptr_tokens = args.ptr_tokens if args.ptr_tokens is not None else {504: 64, 1008: 48}.get(imgsz, 32)
-        name = f"memory_attention_fixed_S7_P{ptr_tokens}.onnx"
-        out = trk_dir / name
-        if not exists(out, name, args.force):
-            ok = ok and run([
-                sys.executable,
-                "export/tracker_modules/export_memory_attention_padded.py",
-                "--onnx-dir", str(onnx_dir),
-                "--imgsz", str(imgsz),
-                "--ptr-tokens", str(ptr_tokens),
-                "--checkpoint", str(args.checkpoint),
-            ], f"[5/5] Export memory_attention (S7_P{ptr_tokens}) @{imgsz}px")
+        for spatial_slots in range(1, args.max_spatial_slots + 1):
+            name = f"memory_attention_fixed_S{spatial_slots}_P{ptr_tokens}.onnx"
+            out = trk_dir / name
+            if not exists(out, name, args.force):
+                ok = ok and run([
+                    sys.executable,
+                    "export/tracker_modules/export_memory_attention_padded.py",
+                    "--onnx-dir", str(onnx_dir),
+                    "--imgsz", str(imgsz),
+                    "--spatial-slots", str(spatial_slots),
+                    "--ptr-tokens", str(ptr_tokens),
+                    "--checkpoint", str(args.checkpoint),
+                ], f"[6/8] Export memory_attention "
+                   f"(S{spatial_slots}_P{ptr_tokens}) @{imgsz}px")
 
     if run_all or "fixed_decoder" in steps:
         if imgsz != 504:
@@ -185,7 +210,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                     "export/detector/export_fixed_detr_decoder.py",
                     "--checkpoint", str(args.checkpoint),
                     "--output-dir", str(fixed_dir),
-                ], "[6/7] Export fixed DETR decoder")
+                ], "[7/8] Export fixed DETR decoder")
             fixed_mxr = fixed_dir / "direct_gpuio.mxr"
             if not exists(fixed_mxr, "fixed decoder MXR", args.force):
                 command = [
@@ -196,7 +221,7 @@ def build_for_imgsz(imgsz: int, args) -> bool:
                 ]
                 if args.force:
                     command.append("--force")
-                ok = ok and run(command, "[7/7] Compile fixed DETR decoder MXR")
+                ok = ok and run(command, "[8/8] Compile fixed DETR decoder MXR")
 
     return ok
 
