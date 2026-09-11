@@ -85,6 +85,7 @@ class SAM3Live:
         dtype: torch.dtype = torch.float16,
         device: str | torch.device | None = None,
         mig: bool = False,
+        parallel_tail: bool | None = None,
         max_vision_features_cache_size: int = 1,
         keep_recent_frames: int = 0,
         redetect_every: int = 1,
@@ -103,6 +104,9 @@ class SAM3Live:
             device: torch device, defaults to cuda if available.
             mig: enable MIGraphX accelerated paths (vision encoder, DETR encoder,
                 memory attention, batched mask decoder). Highly recommended.
+            parallel_tail: overlap the detector and tracker branches on two HIP
+                streams after their shared backbone. ``None`` (default) enables
+                it with MIG; pass ``False`` for a serial diagnostic fallback.
             max_vision_features_cache_size: HF vision-feature LRU size. Default 1
                 — only keeps the most recent frame's features.
             keep_recent_frames: bound on number of past raw frame tensors kept
@@ -160,6 +164,11 @@ class SAM3Live:
         self.keep_recent_frames = keep_recent_frames
         self.redetect_every = max(1, int(redetect_every))
         self.max_objects_per_prompt = max_objects_per_prompt
+        if parallel_tail is None:
+            parallel_tail = mig
+        if parallel_tail and not mig:
+            raise ValueError("parallel_tail=True requires mig=True")
+        self.parallel_tail = bool(parallel_tail)
         # Force full detection on next infer() (frame 0, or first after reset).
         self._force_detect_next = True
         # Monotonic count of calls to infer() — drives the redetect schedule.
@@ -259,6 +268,11 @@ class SAM3Live:
             if onnx_dir is None:
                 raise ValueError("mig=True requires onnx_dir")
             self._apply_mig_patches(Path(onnx_dir), imgsz)
+
+        if self.parallel_tail:
+            from .parallel_video import patch_parallel_video_tail
+            patch_parallel_video_tail(self.model)
+            print("[SAM3Live] parallel detector/tracker tail enabled")
 
         # Detector-skip patch — always applied; controlled per-frame via
         # model._skip_detection. Idempotent.
@@ -631,6 +645,8 @@ class SAM3Live:
         # processed_frames is preserved (raw pixel tensors stay), but we
         # don't reuse old frame_idx so this is OK.
         self.session.reset_state()
+        if self.parallel_tail:
+            self.session._parallel_tail_failed = False
         # reset_state() does NOT clear processed_frames — drop the stale
         # raw pixel buffers ourselves so memory doesn't leak and our reset
         # counter doesn't collide with old indices on the next infer().
@@ -651,6 +667,13 @@ class SAM3Live:
         # Force detection on next frame — no tracked objects to propagate.
         self._force_detect_next = True
 
+    def close(self) -> None:
+        """Release resources owned by optional inference schedulers."""
+        if hasattr(self.model, "_parallel_tail_runtime"):
+            from .parallel_video import close_parallel_video_tail
+
+            close_parallel_video_tail(self.model)
+
     def reset_tracking(self) -> None:
         """Drop tracked-object history but keep prompts. Use when the scene
         has changed enough that re-detection from scratch is desired.
@@ -660,6 +683,8 @@ class SAM3Live:
         reset_prompts() with the same prompt list.
         """
         self.session.reset_inference_session()
+        if self.parallel_tail:
+            self.session._parallel_tail_failed = False
         if self.session.processed_frames is not None:
             self.session.processed_frames.clear()
         self._next_frame_idx = 0

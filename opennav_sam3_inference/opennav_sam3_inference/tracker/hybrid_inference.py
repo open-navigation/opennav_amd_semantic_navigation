@@ -89,6 +89,7 @@ class SAM3HybridLive:
         dtype: torch.dtype = torch.float16,
         device: str | torch.device | None = None,
         mig: bool = True,
+        parallel_tail: bool | None = None,
         redetect_interval_ms: float = 1000.0,
         max_objects_per_prompt: int | dict[str, int] | None = 5,
         iou_assoc_threshold: float = 0.3,
@@ -118,6 +119,9 @@ class SAM3HybridLive:
                 docstring for the full text-bootstrap → box-prompt flow).
                 Default 0 = pure text-prompt keyframes (original behavior).
             bootstrap_min_score: passthrough to underlying SAM3Live.
+            parallel_tail: overlap detector/tracker work on SAM3 keyframes.
+                ``None`` (default) enables it with MIG; pass ``False`` for a
+                serial diagnostic fallback.
         """
         self.imgsz = imgsz
         self.onnx_dir = Path(onnx_dir)
@@ -135,6 +139,7 @@ class SAM3HybridLive:
             dtype=dtype,
             device=device,
             mig=mig,
+            parallel_tail=parallel_tail,
             redetect_every=1,
             max_objects_per_prompt=max_objects_per_prompt,
             max_vision_features_cache_size=max_vision_features_cache_size,
@@ -185,6 +190,10 @@ class SAM3HybridLive:
         self.tracker_to_prompt.clear()
         self.tracker_to_score.clear()
         self._force_keyframe_next = True
+
+    def close(self) -> None:
+        """Release worker resources owned by the underlying live model."""
+        self.live.close()
 
     def infer(self, frame_bgr: np.ndarray, *, full_detection: bool | None = None) -> dict:
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
