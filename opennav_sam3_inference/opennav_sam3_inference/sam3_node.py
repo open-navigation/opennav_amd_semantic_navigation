@@ -179,6 +179,7 @@ class Sam3InferenceNode(Node):
 
         self._bridge = CvBridge()
         self._infer_lock = threading.Lock()
+        self._runtime_closed = False
 
         self._pub = self.create_publisher(Image, '~/segmentation_mask', queue_depth)
         self._label_mask_pub = self.create_publisher(Image, '~/label_mask', queue_depth)
@@ -270,31 +271,49 @@ class Sam3InferenceNode(Node):
             response.success = False
             response.message = str(exc)
             return response
-        old_n = len(self._prompts)
-        new_n = len(prompts)
-        if new_n != old_n:
-            self.get_logger().warn(
-                f'Prompt count changed to {new_n}; there will be added latency '
-                'on the next image. Wait for a fresh ~/label_mask before '
-                'assuming the new prompts are live.'
+
+        # Session state belongs to the same single inference owner protected by
+        # _infer_lock. Wait for the current frame to finish before replacing it.
+        with self._infer_lock:
+            if self._runtime_closed:
+                response.success = False
+                response.message = 'SAM3 runtime is shutting down'
+                return response
+            old_n = len(self._prompts)
+            new_n = len(prompts)
+            if new_n != old_n:
+                self.get_logger().warn(
+                    f'Prompt count changed to {new_n}; there will be added '
+                    'latency on the next image. Wait for a fresh ~/label_mask '
+                    'before assuming the new prompts are live.'
+                )
+            self._live.reset_prompts(prompts)
+            self._prompts = prompts
+            self._class_ids = class_ids
+            self._prompt_to_class_id = dict(zip(prompts, class_ids))
+            self._publish_label_info()
+            mapping = ', '.join(
+                f'{name}={class_id}'
+                for name, class_id in zip(self._prompts, self._class_ids)
             )
-        self._live.reset_prompts(prompts)
-        self._prompts = prompts
-        self._class_ids = class_ids
-        self._prompt_to_class_id = dict(zip(prompts, class_ids))
-        self._publish_label_info()
-        mapping = ', '.join(f'{n}={c}' for n, c in zip(self._prompts, self._class_ids))
-        response.success = True
-        response.message = f'Prompts updated: {mapping}'
-        self.get_logger().info(response.message)
+            response.success = True
+            response.message = f'Prompts updated: {mapping}'
+            self.get_logger().info(response.message)
         return response
 
     def _on_enable(self, request, response):
-        self._enabled = request.data
-        state = 'enabled' if self._enabled else 'disabled'
-        self.get_logger().info(f'Inference {state}')
-        response.success = True
-        response.message = f'Inference {state}'
+        # Serializing this state change guarantees that a successful disable
+        # response is never followed by output from an older in-flight frame.
+        with self._infer_lock:
+            if self._runtime_closed:
+                response.success = False
+                response.message = 'SAM3 runtime is shutting down'
+                return response
+            self._enabled = request.data
+            state = 'enabled' if self._enabled else 'disabled'
+            self.get_logger().info(f'Inference {state}')
+            response.success = True
+            response.message = f'Inference {state}'
         return response
 
     def _on_image(self, msg: Image):
@@ -310,6 +329,10 @@ class Sam3InferenceNode(Node):
             return
 
         try:
+            # Enable state can change after the optimistic check above but
+            # before this callback acquires the lock.
+            if self._runtime_closed or not self._enabled:
+                return
             bgr = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
             prompts = self._prompts
@@ -379,6 +402,24 @@ class Sam3InferenceNode(Node):
             f'Finished processing image with timestamp {msg.header.stamp.sec}.'
             f'{msg.header.stamp.nanosec}'
         )
+
+    def _close_runtime(self) -> None:
+        """Close the inference runtime once while no inference call is active."""
+        if self._runtime_closed:
+            return
+        try:
+            self._live.close()
+        finally:
+            self._runtime_closed = True
+
+    def destroy_node(self):
+        """Release inference workers before destroying ROS node resources."""
+        try:
+            with self._infer_lock:
+                self._close_runtime()
+        except Exception as exc:
+            self.get_logger().error(f'Failed to close SAM3 runtime: {exc}')
+        return super().destroy_node()
 
 
 def _color_for_class_id(class_id: int) -> np.ndarray:
