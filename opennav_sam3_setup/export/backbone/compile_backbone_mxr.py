@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Compile simplified backbone ONNX to a MIGraphX .mxr cache with autotuning.
 
-Reads backbone_<source>/single_simplified.onnx and produces backbone_<source>/tuned.mxr —
-the runtime cache that tracker.py loads in ~3s instead of recompiling each
-session.
+Reads backbone_<source>/single_simplified.onnx and produces either
+backbone_<source>/tuned.mxr (host I/O) or tuned_gpuio.mxr (Torch GPU I/O).
+Both are runtime caches that load in seconds instead of recompiling each
+session; the GPU-I/O artifact is additive and never overwrites tuned.mxr.
 
 Autotuning runs ~3 minutes for 504px and ~9 minutes for 1008px the first
 time; the resulting .mxr is hardware-specific (gfx1151) and locked to the
@@ -48,6 +49,11 @@ def parse_args():
         action="store_true",
         help="Skip post-compile output sanity check.",
     )
+    p.add_argument(
+        "--gpu-io",
+        action="store_true",
+        help="Compile with GPU-resident inputs/outputs and write tuned_gpuio.mxr.",
+    )
     return p.parse_args()
 
 
@@ -55,7 +61,7 @@ def main():
     args = parse_args()
     sub_dir = args.onnx_dir / f"backbone_{args.backbone_source}"
     src = sub_dir / "single_simplified.onnx"
-    dst = sub_dir / "tuned.mxr"
+    dst = sub_dir / ("tuned_gpuio.mxr" if args.gpu_io else "tuned.mxr")
 
     if not src.exists():
         raise FileNotFoundError(
@@ -97,7 +103,7 @@ def main():
     prog = migraphx.parse_onnx(str(src))
     if not args.no_fp16:
         migraphx.quantize_fp16(prog)
-    prog.compile(migraphx.get_target("gpu"), offload_copy=True)
+    prog.compile(migraphx.get_target("gpu"), offload_copy=not args.gpu_io)
     elapsed = time.perf_counter() - t0
     print(f"  Compiled in {elapsed:.0f}s")
 
@@ -106,6 +112,22 @@ def main():
     print(f"  Saved: {dst}  ({size_mb:.0f} MB)")
 
     if args.skip_verify:
+        return
+
+    if args.gpu_io:
+        print("\n[verify] Running GPU-resident backbone ...")
+        params = {
+            name: migraphx.to_gpu(migraphx.generate_argument(shape))
+            for name, shape in prog.get_parameter_shapes().items()
+        }
+        outs = prog.run(params)
+        migraphx.gpu_sync()
+        for i, output in enumerate(outs):
+            array = np.array(migraphx.from_gpu(output))
+            if not np.isfinite(array).all():
+                raise SystemExit(f"GPU output {i} contains non-finite values")
+            print(f"  output_{i}: shape={array.shape} finite=True")
+        print("  OK — GPU-resident inputs and outputs are valid")
         return
 
     print("\n[verify] Running compiled backbone, checking outputs are C-contiguous ...")
