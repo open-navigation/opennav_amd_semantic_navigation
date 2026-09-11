@@ -5,8 +5,9 @@ Two pipelines, pick one or both:
 
   box   — SAM3OnnxTracker (demo.py): tracker modules + MIGraphX backbone
             ~10 min @504px / ~20 min @1008px
-  text  — Sam3VideoModel (demo_text.py --mig): detector backbone + DETR encoder,
-            padded memory_attention, and optional fixed 504px DETR decoder
+  text  — Sam3VideoModel (demo_text.py --mig): GPU-I/O detector backbone,
+            DETR encoder, shape-specialized memory attention, and optional
+            fixed 504px DETR decoder
             ~18 min @504px / ~30 min @1008px
 
 Usage:

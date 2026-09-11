@@ -9,23 +9,22 @@ FIXED-shape ONNX (`memory_attention_fixed_S7_P64.onnx` produced by
     pointer tokens: 64 (= max_object_pointers_in_encoder * 4, cap)
     total memory: 36352 tokens
 
-Fallback rule:
-    The shim runs MIG ONLY when the spatial portion equals 36288 AND the
-    pointer count is ≤ 64. For early-video frames (first ~7) the spatial
-    bank isn't full yet, so we fall through to the original PyTorch
-    forward. After frame ~16 the pointer count caps at 64 and every frame
-    is the same fixed shape → MIG fast path.
+Shape-specialization rule:
+    The shim loads each available S1..S10 sibling graph and selects the exact
+    spatial-memory shape at runtime. Missing shapes fall back to the original
+    PyTorch forward. Pointer tokens are padded or truncated to the compiled K.
 
 Why fixed-shape pad rather than dynamic shape:
-- Dynamic ONNX through ORT MIG EP recompiles per shape (~90 s each); since
-  pointer count grows by 4 every frame for the first 16 frames, that means
-  16 cold compiles before steady-state.
+- Dynamic ONNX through ORT MIG EP recompiles per shape. The build therefore
+  emits ten bounded spatial shapes and a fixed pointer-token capacity.
 - Direct migraphx.parse_onnx + quantize_fp16 has the FP16 attention
   numerical bug (Finding #8 / detr_encoder analog).
 """
 from __future__ import annotations
 
 from pathlib import Path
+import re
+import time
 
 import numpy as np
 import torch
@@ -36,13 +35,12 @@ from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
 
 
 # ----- shape constants -----
-SPATIAL_SLOTS = 7
 # K is the pointer-token cap. Resolution matters because the MIGraphX MLIR
 # attention kernel selection is shape-dependent (measured 2026-05-15):
 #   504px:  K=4..64 all ≈ 20 ms  (no cliff — production K=64, 16 obj cap)
 #   1008px: K=4..48 all ≈ 87 ms  (fast)
 #   1008px: K=56..64 = 768..806 ms  (cliff, ~9× regression — kernel-pick bug)
-# Production K is selected per-imgsz in demo_text.py and the build scripts
+# Production K is selected per-imgsz in tools/text_baseline.py and the build scripts
 # (504→64, 1008→48). Runtime adapts to whatever K is baked into the loaded ONNX.
 DEFAULT_PTR_TOKENS = 64  # only the export-script default; runtime reads from ONNX
 
@@ -51,7 +49,10 @@ class MIGMemoryAttention(nn.Module):
     """ORT MIG EP shim for tracker_model.memory_attention.
 
     Shape parameters (HW per spatial frame, K = ptr-token cap) are inferred
-    from the ONNX session's input shapes — one shim instance per resolution.
+    from the ONNX session's input shapes. All sibling files with the same
+    pointer capacity are loaded as exact-shape specializations. This covers
+    both the seven non-conditioning memory slots and additional conditioning
+    frames without falling back to PyTorch.
     """
 
     def __init__(self, onnx_path: Path, original_forward,
@@ -61,49 +62,77 @@ class MIGMemoryAttention(nn.Module):
         # monkey-patch the module's forward. Storing the module + going through
         # __call__ recurses (because the patched forward calls us again).
         self._original_forward = original_forward
-        opts = ort.SessionOptions()
-        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        onnx_path = Path(onnx_path)
         cache_dir = Path(ort_cache_dir) if ort_cache_dir else (
-            Path(onnx_path).parent / "ort_cache_mem_attn"
+            onnx_path.parent / 'ort_cache_mem_attn'
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
-        providers = [
+        self._providers = [
             ("MIGraphXExecutionProvider", {
                 "migraphx_fp16_enable": "1",
                 "migraphx_model_cache_dir": str(cache_dir),
             }),
             "CPUExecutionProvider",
         ]
-        print(f"  memory_attention (ORT MIG EP, fp16): compiling from {Path(onnx_path).name} ...")
-        import time
-        t0 = time.perf_counter()
-        self.session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
-        elapsed = time.perf_counter() - t0
-        prov = self.session.get_providers()[0]
-        output = self.session.get_outputs()[0]
-        self.output_name = output.name
-        self.output_shape = tuple(int(dim) for dim in output.shape)
-        self._gpu_io_enabled = prov == "MIGraphXExecutionProvider"
+        match = re.search(r'_S(\d+)_P(\d+)\.onnx$', onnx_path.name)
+        if match is None:
+            raise ValueError(
+                f'Cannot infer memory-attention shape from {onnx_path.name}; '
+                'expected memory_attention_fixed_S<slots>_P<pointers>.onnx'
+            )
+        base_slots, self.ptr_tokens = map(int, match.groups())
 
-        # Infer shape constants from the ONNX session inputs.
-        #   current_vision_features: (HW, 1, 256)
-        #   memory:                  (S*HW + K, 1, 64)
+        self._sessions = {}
+        pattern = f'memory_attention_fixed_S*_P{self.ptr_tokens}.onnx'
+        for path in sorted(onnx_path.parent.glob(pattern)):
+            candidate = re.search(r'_S(\d+)_P(\d+)\.onnx$', path.name)
+            if candidate is None:
+                continue
+            slots, pointer_tokens = map(int, candidate.groups())
+            if pointer_tokens == self.ptr_tokens:
+                self._sessions[slots] = self._load_session(path)
+
+        if base_slots not in self._sessions:
+            raise FileNotFoundError(onnx_path)
+        self.session = self._sessions[base_slots][0]
+
+        # Infer HW from the canonical largest-slot session.
         in_shapes = {x.name: x.shape for x in self.session.get_inputs()}
         self.HW = int(in_shapes["current_vision_features"][0])
         total_mem = int(in_shapes["memory"][0])
-        self.spatial_len = SPATIAL_SLOTS * self.HW
-        self.ptr_tokens = total_mem - self.spatial_len
-        if self.ptr_tokens < 0:
+        expected_total = base_slots * self.HW + self.ptr_tokens
+        if total_mem != expected_total:
             raise RuntimeError(
-                f"ONNX memory length {total_mem} < expected spatial {self.spatial_len} "
-                f"(HW={self.HW}, S={SPATIAL_SLOTS}). Re-export the padded ONNX."
+                f'ONNX memory length {total_mem} != expected {expected_total} '
+                f'(HW={self.HW}, S={base_slots}, K={self.ptr_tokens})'
             )
-        print(f"  memory_attention (ORT MIG EP): ready in {elapsed:.1f}s on {prov}  "
-              f"(HW={self.HW}, spatial={self.spatial_len}, K={self.ptr_tokens})")
+        print(
+            '  memory_attention shape sessions ready: '
+            f'S={sorted(self._sessions)} (HW={self.HW}, K={self.ptr_tokens})'
+        )
 
         # Stats
         self._mig_calls = 0
         self._pt_fallback_calls = 0
+        self._gpu_io_disabled_slots = set()
+
+    def _load_session(self, path: Path):
+        opts = ort.SessionOptions()
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        print(
+            f"  memory_attention S{path.stem.split('_S')[-1].split('_')[0]}: "
+            f'loading {path.name} ...'
+        )
+        t0 = time.perf_counter()
+        session = ort.InferenceSession(
+            str(path), sess_options=opts, providers=self._providers
+        )
+        elapsed = time.perf_counter() - t0
+        provider = session.get_providers()[0]
+        output = session.get_outputs()[0]
+        output_shape = tuple(int(dim) for dim in output.shape)
+        print(f'    ready in {elapsed:.1f}s on {provider}')
+        return session, output.name, output_shape, provider == 'MIGraphXExecutionProvider'
 
     def forward(
         self,
@@ -114,9 +143,13 @@ class MIGMemoryAttention(nn.Module):
         num_object_pointer_tokens: int = 0,
     ):
         spatial_part = memory.shape[0] - num_object_pointer_tokens
-        # Fast-path requires the steady-state spatial size; pointer count
-        # may exceed self.ptr_tokens (we truncate to the most-recent K).
-        ok = (spatial_part == self.spatial_len
+        spatial_slots, remainder = divmod(spatial_part, self.HW)
+        session_info = self._sessions.get(spatial_slots)
+        # Each exact spatial shape has its own compiled session. Pointer count
+        # may exceed self.ptr_tokens, in which case the oldest pointers are
+        # truncated as before.
+        ok = (remainder == 0
+              and session_info is not None
               and num_object_pointer_tokens >= 0
               and current_vision_features.shape[0] == self.HW)
 
@@ -133,12 +166,14 @@ class MIGMemoryAttention(nn.Module):
         self._mig_calls += 1
         device = current_vision_features.device
         dtype = current_vision_features.dtype
+        session, output_name, output_shape, gpu_io_enabled = session_info
 
         # Object pointers are at the END of the memory tensor:
-        #   [spatial(self.spatial_len) | actual_ptrs(N)]
+        #   [spatial(spatial_part) | actual_ptrs(N)]
         # We need exactly self.ptr_tokens slots:
         #   N <= ptr_tokens:  pad with zeros (no info loss)
-        #   N >  ptr_tokens:  keep last ptr_tokens (drop oldest pointers)
+        #   N >  ptr_tokens:  keep conditioning and newest temporal pointers
+        #                      (HF orders them from newest to oldest)
         spatial = memory[:spatial_part]
         spatial_pos = memory_posision_embeddings[:spatial_part]
         ptrs = memory[spatial_part:]
@@ -151,50 +186,44 @@ class MIGMemoryAttention(nn.Module):
                 ptrs = torch.cat([ptrs, zero_pad], dim=0)
                 ptrs_pos = torch.cat([ptrs_pos, zero_pad], dim=0)
         else:
-            # Keep the LAST K pointers (most recent in PT temporal order)
-            ptrs = ptrs[-self.ptr_tokens:]
-            ptrs_pos = ptrs_pos[-self.ptr_tokens:]
+            # HF orders conditioning pointers first, followed by temporal
+            # pointers from newest to oldest, so retain the first K tokens.
+            ptrs = ptrs[:self.ptr_tokens]
+            ptrs_pos = ptrs_pos[:self.ptr_tokens]
 
         memory_padded = torch.cat([spatial, ptrs], dim=0)
         mem_pos_padded = torch.cat([spatial_pos, ptrs_pos], dim=0)
 
         ort_inputs = {
-            "current_vision_features": current_vision_features,
-            "memory": memory_padded,
-            "current_vis_pos_embed": current_vision_position_embeddings,
-            "memory_pos_embed": mem_pos_padded,
+            'current_vision_features': current_vision_features,
+            'memory': memory_padded,
+            'current_vis_pos_embed': current_vision_position_embeddings,
+            'memory_pos_embed': mem_pos_padded,
         }
         out_4d = None
-        if self._gpu_io_enabled and device.type == "cuda":
+        if (gpu_io_enabled
+                and spatial_slots not in self._gpu_io_disabled_slots
+                and device.type == 'cuda'):
             try:
                 out_4d = run_float32_gpu(
-                    self.session,
+                    session,
                     ort_inputs,
-                    self.output_name,
-                    self.output_shape,
+                    output_name,
+                    output_shape,
                 )
             except GpuIoExecutionError:
-                # Execution may already be in flight; a host retry could race
-                # the same ORT session and is not safe.
                 raise
             except Exception as exc:
-                if not getattr(self, "_warned_gpu_io", False):
-                    print(
-                        "  [MIGMemoryAttention] GPU I/O binding disabled: "
-                        f"{exc}"
-                    )
-                    self._warned_gpu_io = True
-                # Pre-submit binding failures are safe to retry. Keep the
-                # fallback permanent so every later call follows one path.
-                self._gpu_io_enabled = False
+                print(
+                    f'  [MIGMemoryAttention] S{spatial_slots} GPU I/O '
+                    f'binding disabled: {exc}'
+                )
+                self._gpu_io_disabled_slots.add(spatial_slots)
         if out_4d is None:
-            out_np = self.session.run(
-                None,
-                {
-                    name: tensor.detach().float().cpu().numpy()
-                    for name, tensor in ort_inputs.items()
-                },
-            )
+            out_np = session.run(None, {
+                name: tensor.detach().float().cpu().numpy()
+                for name, tensor in ort_inputs.items()
+            })
             out_4d = torch.from_numpy(out_np[0]).to(device=device)
 
         # ONNX exports `conditioned_features` as (1, 256, H, W); PT returns
