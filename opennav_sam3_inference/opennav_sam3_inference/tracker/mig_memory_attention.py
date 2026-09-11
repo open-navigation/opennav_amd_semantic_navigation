@@ -32,6 +32,8 @@ import torch
 import torch.nn as nn
 import onnxruntime as ort
 
+from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
+
 
 # ----- shape constants -----
 SPATIAL_SLOTS = 7
@@ -78,6 +80,10 @@ class MIGMemoryAttention(nn.Module):
         self.session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
         elapsed = time.perf_counter() - t0
         prov = self.session.get_providers()[0]
+        output = self.session.get_outputs()[0]
+        self.output_name = output.name
+        self.output_shape = tuple(int(dim) for dim in output.shape)
+        self._gpu_io_enabled = prov == "MIGraphXExecutionProvider"
 
         # Infer shape constants from the ONNX session inputs.
         #   current_vision_features: (HW, 1, 256)
@@ -152,21 +158,50 @@ class MIGMemoryAttention(nn.Module):
         memory_padded = torch.cat([spatial, ptrs], dim=0)
         mem_pos_padded = torch.cat([spatial_pos, ptrs_pos], dim=0)
 
-        # Run via ORT MIG EP (numpy fp32)
-        out_np = self.session.run(None, {
-            "current_vision_features": current_vision_features.detach().float().cpu().numpy(),
-            "memory":                  memory_padded.detach().float().cpu().numpy(),
-            "current_vis_pos_embed":   current_vision_position_embeddings.detach().float().cpu().numpy(),
-            "memory_pos_embed":        mem_pos_padded.detach().float().cpu().numpy(),
-        })
+        ort_inputs = {
+            "current_vision_features": current_vision_features,
+            "memory": memory_padded,
+            "current_vis_pos_embed": current_vision_position_embeddings,
+            "memory_pos_embed": mem_pos_padded,
+        }
+        out_4d = None
+        if self._gpu_io_enabled and device.type == "cuda":
+            try:
+                out_4d = run_float32_gpu(
+                    self.session,
+                    ort_inputs,
+                    self.output_name,
+                    self.output_shape,
+                )
+            except GpuIoExecutionError:
+                # Execution may already be in flight; a host retry could race
+                # the same ORT session and is not safe.
+                raise
+            except Exception as exc:
+                if not getattr(self, "_warned_gpu_io", False):
+                    print(
+                        "  [MIGMemoryAttention] GPU I/O binding disabled: "
+                        f"{exc}"
+                    )
+                    self._warned_gpu_io = True
+                # Pre-submit binding failures are safe to retry. Keep the
+                # fallback permanent so every later call follows one path.
+                self._gpu_io_enabled = False
+        if out_4d is None:
+            out_np = self.session.run(
+                None,
+                {
+                    name: tensor.detach().float().cpu().numpy()
+                    for name, tensor in ort_inputs.items()
+                },
+            )
+            out_4d = torch.from_numpy(out_np[0]).to(device=device)
+
         # ONNX exports `conditioned_features` as (1, 256, H, W); PT returns
         # (1, 1, HW, 256). Caller (_prepare_memory_conditioned_features) does:
         #   .squeeze(1).permute(0,2,1).view(B, C, H, W)
         # so we must return the (1, 1, HW, 256) shape PT does.
-        out_np_arr = out_np[0]                  # (1, 256, H, W) np float32
-        # Reshape to (1, 1, HW, 256) on host (cheap), THEN move to GPU+fp16
-        out_4d = torch.from_numpy(out_np_arr)   # (1, 256, H, W) cpu fp32
-        out_4d = out_4d.flatten(2).permute(0, 2, 1).unsqueeze(0)  # (1, 1, HW, 256)
+        out_4d = out_4d.flatten(2).permute(0, 2, 1).unsqueeze(0)
         return out_4d.to(device=device, dtype=dtype)
 
 
