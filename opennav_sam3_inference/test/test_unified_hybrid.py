@@ -119,6 +119,58 @@ def _make_hybrid(module, outputs):
     return hybrid
 
 
+def test_live_provenance_matches_actual_detector_execution(hybrid_module):
+    """Report whether absence in a direct live result is authoritative."""
+    torch = pytest.importorskip('torch')
+
+    class FakeModel:
+        """Return an empty but structurally valid streaming result."""
+
+        _skip_detection = False
+
+        def __call__(self, *, inference_session, frame, frame_idx):
+            return SimpleNamespace(
+                frame_idx=frame_idx,
+                obj_id_to_tracker_score={},
+                obj_id_to_mask={},
+                obj_id_to_score={},
+                suppressed_obj_ids=set(),
+            )
+
+    live = hybrid_module.SAM3Live.__new__(hybrid_module.SAM3Live)
+    live.processor = SimpleNamespace(
+        video_processor=lambda **_kwargs: SimpleNamespace(
+            pixel_values_videos=torch.zeros((1, 1, 3, 4, 5)),
+        ),
+        postprocess_outputs=lambda **_kwargs: {
+            'object_ids': torch.empty(0, dtype=torch.int64),
+            'scores': torch.empty(0),
+            'prompt_to_obj_ids': {},
+        },
+    )
+    live.device = torch.device('cpu')
+    live.dtype = torch.float32
+    live.model = FakeModel()
+    live.session = object()
+    live._force_detect_next = True
+    live._infer_calls = 0
+    live.redetect_every = 1
+    live._next_frame_idx = 0
+    live.bootstrap_frames = 0
+    live.max_objects_per_prompt = None
+    live.keep_recent_frames = 0
+    live._drift_enabled = False
+
+    frame = np.zeros((4, 5, 3), dtype=np.uint8)
+    forced_detection = live.infer(frame, full_detection=False)
+    propagation = live.infer(frame, full_detection=False)
+
+    assert forced_detection['detected'] is True
+    assert forced_detection['negative_evidence_valid'] is True
+    assert propagation['detected'] is False
+    assert propagation['negative_evidence_valid'] is False
+
+
 def test_live_session_replacement_preserves_only_prompt_state(hybrid_module):
     """Replace tracking state atomically while retaining cached prompts."""
     created = []
