@@ -119,7 +119,7 @@ def build_box(imgsz: int, args) -> bool:
                 sys.executable,
                 "export/backbone/export_backbone_single.py",
                 "--imgsz", str(imgsz),
-                "--onnx_dir", str(onnx_dir),
+                "--onnx-dir", str(onnx_dir),
                 "--backbone-source", "tracker",
                 "--checkpoint", str(args.checkpoint),
             ], "Export backbone ONNX (tracker FPN)")

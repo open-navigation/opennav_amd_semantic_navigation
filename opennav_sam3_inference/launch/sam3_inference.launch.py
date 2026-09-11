@@ -1,15 +1,61 @@
 # Copyright (C) 2026 Open Navigation LLC. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.actions import SetEnvironmentVariable
+
+
+_DEFAULT_MIGRAPHX_ROOT = '/opt/opennav-sam3/runtime/0.2.0-rc4/migraphx'
+_DEFAULT_ROCM_ROOT = '/opt/rocm'
+
+
+def _prepend_paths(entries, existing):
+    return ':'.join([*entries, existing] if existing else entries)
+
+
+def _sam3_runtime_environment():
+    """Build the isolated environment for the SAM3 inference process."""
+    migraphx_root = os.environ.get('SAM3_MIGRAPHX_ROOT', _DEFAULT_MIGRAPHX_ROOT)
+    rocm_root = os.environ.get('SAM3_ROCM_PATH', _DEFAULT_ROCM_ROOT)
+    return {
+        'SAM3_MIGRAPHX_ROOT': migraphx_root,
+        'ROCM_PATH': rocm_root,
+        'PATH': _prepend_paths(
+            [f'{migraphx_root}/bin', f'{rocm_root}/bin'],
+            os.environ.get('PATH', ''),
+        ),
+        'PYTHONPATH': _prepend_paths(
+            [f'{migraphx_root}/lib'], os.environ.get('PYTHONPATH', '')
+        ),
+        'LD_LIBRARY_PATH': _prepend_paths(
+            [
+                f'{migraphx_root}/lib',
+                f'{migraphx_root}/lib/migraphx/lib',
+                f'{rocm_root}/lib',
+                f'{rocm_root}/lib64',
+                f'{rocm_root}/core-7.14/lib',
+                f'{rocm_root}/core-7.14/lib/host-math/lib',
+                f'{rocm_root}/core-7.14/lib/rocm_sysdeps/lib',
+            ],
+            os.environ.get('LD_LIBRARY_PATH', ''),
+        ),
+        'HSA_OVERRIDE_GFX_VERSION': os.environ.get(
+            'HSA_OVERRIDE_GFX_VERSION', '11.5.1'
+        ),
+        'MIGRAPHX_GPU_HIP_FLAGS': os.environ.get(
+            'MIGRAPHX_GPU_HIP_FLAGS',
+            '-Wno-error -Wno-lifetime-safety-intra-tu-suggestions',
+        ),
+        'TRANSFORMERS_OFFLINE': os.environ.get('TRANSFORMERS_OFFLINE', '1'),
+    }
 
 
 def generate_launch_description():
@@ -23,23 +69,9 @@ def generate_launch_description():
     sensor_processing_pipeline = LaunchConfiguration('sensor_processing_pipeline')
     namespace = LaunchConfiguration('namespace')
     log_level = LaunchConfiguration('log_level')
+    runtime_environment = _sam3_runtime_environment()
 
     return LaunchDescription([
-        SetEnvironmentVariable(
-            name='LD_LIBRARY_PATH',
-            value=[
-                '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
-                '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0:',
-                EnvironmentVariable('LD_LIBRARY_PATH', default_value=''),
-            ],
-        ),
-        SetEnvironmentVariable(
-            name='PYTHONPATH',
-            value=[
-                '/opt/rocm-7.2.0/lib:',
-                EnvironmentVariable('PYTHONPATH', default_value=''),
-            ],
-        ),
         DeclareLaunchArgument(
             'params_file',
             default_value=default_params,
@@ -81,9 +113,7 @@ def generate_launch_description():
             remappings=[
                 ('~/image', image_topic),
             ],  
-            additional_env={
-                'LD_PRELOAD': '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
-                '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0'},
+            additional_env=runtime_environment,
             arguments=['--ros-args', '--log-level', log_level],
         ),
         IncludeLaunchDescription(
