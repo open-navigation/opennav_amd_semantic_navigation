@@ -897,6 +897,7 @@ class SAM3Live:
             "prompt_to_obj_ids": pp["prompt_to_obj_ids"],
             "frame_idx": frame_idx,
             "detected": not skip_detection,
+            'negative_evidence_valid': not skip_detection,
         }
         # Drift detection: record this frame's per-prompt avg score, and
         # throttled-check whether any prompt has dropped enough from its
