@@ -34,10 +34,9 @@ def test_ros_profile_keeps_fixed_decoder_internal():
     node = NODE.read_text()
 
     assert 'redetect_interval_ms: 1000.0' in config
-    assert 'bootstrap_frames: 0' in config
     assert 'fixed_detr_decoder:' not in config
     assert "declare_parameter('fixed_detr_decoder'" not in node
-    assert 'imgsz == 504 and _boot == 0' in node
+    assert '_fixed_detr_decoder = imgsz == 504' in node
 
 
 @pytest.fixture(scope='module')
@@ -142,18 +141,6 @@ def test_fixed_decoder_requires_504px(gpu_runtime):
             imgsz=1008,
             mig=True,
             fixed_detr_decoder=True,
-        )
-
-
-def test_fixed_decoder_rejects_bootstrap_mode(gpu_runtime):
-    with pytest.raises(ValueError, match='cannot be combined with bootstrap_frames'):
-        gpu_runtime.SAM3Live(
-            checkpoint='unused',
-            prompts=['obstacle'],
-            imgsz=504,
-            mig=True,
-            fixed_detr_decoder=True,
-            bootstrap_frames=1,
         )
 
 

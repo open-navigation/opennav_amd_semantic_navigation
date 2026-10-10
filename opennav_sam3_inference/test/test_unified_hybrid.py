@@ -156,10 +156,8 @@ def test_live_provenance_matches_actual_detector_execution(hybrid_module):
     live._infer_calls = 0
     live.redetect_every = 1
     live._next_frame_idx = 0
-    live.bootstrap_frames = 0
     live.max_objects_per_prompt = None
     live.keep_recent_frames = 0
-    live._drift_enabled = False
 
     frame = np.zeros((4, 5, 3), dtype=np.uint8)
     forced_detection = live.infer(frame, full_detection=False)
@@ -207,7 +205,6 @@ def test_live_session_replacement_preserves_only_prompt_state(hybrid_module):
     live._next_frame_idx = 8
     live._infer_calls = 9
     live._force_detect_next = False
-    live._detector_call_counter = 4
 
     live._replace_tracking_session_preserving_prompts()
 
@@ -245,7 +242,6 @@ def test_constructor_uses_only_sam3_live(hybrid_module, monkeypatch):
         onnx_dir='onnx',
         parallel_tail=False,
         fixed_detr_decoder=True,
-        bootstrap_frames=0,
     )
 
     assert type(hybrid.live) is FakeConstructedLive

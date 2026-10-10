@@ -64,9 +64,6 @@ class SAM3HybridLive:
         max_objects_per_prompt: int | dict[str, int] | None = 5,
         iou_assoc_threshold: float = 0.3,
         max_vision_features_cache_size: int = 1,
-        bootstrap_frames: int = 0,
-        bootstrap_min_score: float = 0.3,
-        periodic_rebootstrap_seconds: float | None = None,
     ) -> None:
         """Args:
             redetect_interval_ms: Wall-clock interval between SAM3 keyframe detections
@@ -79,18 +76,10 @@ class SAM3HybridLive:
                 Below this, the detection receives a new public obj_id.
             max_objects_per_prompt: forwarded to the underlying SAM3Live for
                 its own per-prompt cap.
-            bootstrap_frames: forwarded to the underlying SAM3Live keyframe
-                detector. When > 0, the first N keyframes use text prompts
-                normally and capture high-confidence boxes; subsequent
-                keyframes inject those boxes as input_boxes (see SAM3Live
-                docstring for the full text-bootstrap → box-prompt flow).
-                Default 0 = pure text-prompt keyframes (original behavior).
-            bootstrap_min_score: passthrough to underlying SAM3Live.
             parallel_tail: Overlap detector/tracker work on SAM3 keyframes.
                 ``None`` (default) enables it with MIG; pass ``False`` for a
                 serial diagnostic fallback.
             fixed_detr_decoder: Use the direct-MXR fixed 504px DETR decoder.
-                Disabled by default because it requires ``bootstrap_frames=0``.
         """
         self.imgsz = imgsz
         self.onnx_dir = Path(onnx_dir)
@@ -115,9 +104,6 @@ class SAM3HybridLive:
             redetect_every=1,
             max_objects_per_prompt=max_objects_per_prompt,
             max_vision_features_cache_size=max_vision_features_cache_size,
-            bootstrap_frames=bootstrap_frames,
-            bootstrap_min_score=bootstrap_min_score,
-            periodic_rebootstrap_seconds=periodic_rebootstrap_seconds,
         )
         self.device = self.live.device
 
@@ -302,8 +288,8 @@ class SAM3HybridLive:
             if not self._inner_session_fresh:
                 infer_calls = self.live._infer_calls
                 self.live._replace_tracking_session_preserving_prompts()
-                # Session-local indices restart, but the long-running bootstrap
-                # and drift cadence must remain monotonic.
+                # Preserve the long-running detection cadence across the
+                # session-local counter reset.
                 self.live._infer_calls = infer_calls
                 self._inner_session_fresh = True
             clean_keyframe = True

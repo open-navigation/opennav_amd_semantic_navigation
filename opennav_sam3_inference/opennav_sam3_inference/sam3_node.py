@@ -77,9 +77,6 @@ class Sam3InferenceNode(Node):
         # NOTE: OMP/MKL env caps at module top must be raised separately
         # via env var (OMP_NUM_THREADS=N) — those are import-time locked.
         self.declare_parameter('cpu_threads', 1)
-        self.declare_parameter('bootstrap_frames', 0)
-        self.declare_parameter('bootstrap_min_score', 0.3)
-        self.declare_parameter('periodic_rebootstrap_seconds', 180.0)
 
         checkpoint = self.get_parameter('checkpoint').value
         onnx_dir = self.get_parameter('onnx_dir').value
@@ -121,20 +118,15 @@ class Sam3InferenceNode(Node):
             f'(imgsz={imgsz}, onnx_dir={onnx_dir})'
         )
 
-        _boot = int(self.get_parameter('bootstrap_frames').value)
-        _boot_min = float(self.get_parameter('bootstrap_min_score').value)
-        _periodic = float(self.get_parameter('periodic_rebootstrap_seconds').value)
         # Fixed decoder selection follows the supported artifact contract and
         # is intentionally not exposed as a ROS parameter.
-        _fixed_detr_decoder = (
-            imgsz == 504 and _boot == 0
-        )
+        _fixed_detr_decoder = imgsz == 504
 
         if self._redetect_interval_ms <= 0.0:
             from opennav_sam3_inference.tracker.live_inference import SAM3Live
             self.get_logger().info(
-                f'redetect_interval_ms=0: instantiating SAM3Live '
-                f'(per-frame SAM3, bootstrap_frames={_boot})'
+                'redetect_interval_ms=0: instantiating SAM3Live '
+                '(per-frame SAM3)'
             )
             self._live = SAM3Live(
                 checkpoint=checkpoint,
@@ -147,16 +139,13 @@ class Sam3InferenceNode(Node):
                 fixed_detr_decoder=_fixed_detr_decoder,
                 max_objects_per_prompt=max_objects,
                 redetect_every=1,
-                bootstrap_frames=_boot,
-                bootstrap_min_score=_boot_min,
-                periodic_rebootstrap_seconds=_periodic,
             )
         else:
             from opennav_sam3_inference.tracker.hybrid_inference import SAM3HybridLive
             self.get_logger().info(
                 f'redetect_interval_ms={self._redetect_interval_ms:.0f}: '
-                f'instantiating SAM3HybridLive (keyframes + tracker propagation, '
-                f'bootstrap_frames={_boot})'
+                'instantiating SAM3HybridLive '
+                '(keyframes + tracker propagation)'
             )
             self._live = SAM3HybridLive(
                 checkpoint=checkpoint,
@@ -169,9 +158,6 @@ class Sam3InferenceNode(Node):
                 fixed_detr_decoder=_fixed_detr_decoder,
                 redetect_interval_ms=self._redetect_interval_ms,
                 max_objects_per_prompt=max_objects,
-                bootstrap_frames=_boot,
-                bootstrap_min_score=_boot_min,
-                periodic_rebootstrap_seconds=_periodic,
             )
 
         self._prompt_to_class_id = dict(zip(self._prompts, self._class_ids))

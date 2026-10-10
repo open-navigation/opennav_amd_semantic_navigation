@@ -241,7 +241,6 @@ def test_parallel_tail_reset_replaces_failed_session(gpu_runtime):
     live._next_frame_idx = 3
     live._infer_calls = 4
     live._force_detect_next = False
-    live._detector_call_counter = 5
 
     live.reset_tracking()
 
@@ -262,7 +261,6 @@ def test_parallel_tail_reset_replaces_failed_session(gpu_runtime):
     assert live._next_frame_idx == 0
     assert live._infer_calls == 0
     assert live._force_detect_next is True
-    assert live._detector_call_counter == 0
     assert live.model._skip_detection is False
 
 
