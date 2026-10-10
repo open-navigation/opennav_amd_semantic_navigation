@@ -77,9 +77,6 @@ class Sam3InferenceNode(Node):
         # NOTE: OMP/MKL env caps at module top must be raised separately
         # via env var (OMP_NUM_THREADS=N) — those are import-time locked.
         self.declare_parameter('cpu_threads', 1)
-        self.declare_parameter('bootstrap_frames', 5)
-        self.declare_parameter('bootstrap_min_score', 0.3)
-        self.declare_parameter('periodic_rebootstrap_seconds', 180.0)
 
         checkpoint = self.get_parameter('checkpoint').value
         onnx_dir = self.get_parameter('onnx_dir').value
@@ -121,15 +118,15 @@ class Sam3InferenceNode(Node):
             f'(imgsz={imgsz}, onnx_dir={onnx_dir})'
         )
 
-        _boot = int(self.get_parameter('bootstrap_frames').value)
-        _boot_min = float(self.get_parameter('bootstrap_min_score').value)
-        _periodic = float(self.get_parameter('periodic_rebootstrap_seconds').value)
+        # Fixed decoder selection follows the supported artifact contract and
+        # is intentionally not exposed as a ROS parameter.
+        _fixed_detr_decoder = imgsz == 504
 
         if self._redetect_interval_ms <= 0.0:
             from opennav_sam3_inference.tracker.live_inference import SAM3Live
             self.get_logger().info(
-                f'redetect_interval_ms=0: instantiating SAM3Live '
-                f'(per-frame SAM3, bootstrap_frames={_boot})'
+                'redetect_interval_ms=0: instantiating SAM3Live '
+                '(per-frame SAM3)'
             )
             self._live = SAM3Live(
                 checkpoint=checkpoint,
@@ -139,18 +136,16 @@ class Sam3InferenceNode(Node):
                 dtype=torch.float16,
                 device=device,
                 mig=True,
+                fixed_detr_decoder=_fixed_detr_decoder,
                 max_objects_per_prompt=max_objects,
                 redetect_every=1,
-                bootstrap_frames=_boot,
-                bootstrap_min_score=_boot_min,
-                periodic_rebootstrap_seconds=_periodic,
             )
         else:
             from opennav_sam3_inference.tracker.hybrid_inference import SAM3HybridLive
             self.get_logger().info(
                 f'redetect_interval_ms={self._redetect_interval_ms:.0f}: '
-                f'instantiating SAM3HybridLive (keyframes + tracker propagation, '
-                f'bootstrap_frames={_boot})'
+                'instantiating SAM3HybridLive '
+                '(keyframes + tracker propagation)'
             )
             self._live = SAM3HybridLive(
                 checkpoint=checkpoint,
@@ -160,11 +155,9 @@ class Sam3InferenceNode(Node):
                 dtype=torch.float16,
                 device=device,
                 mig=True,
+                fixed_detr_decoder=_fixed_detr_decoder,
                 redetect_interval_ms=self._redetect_interval_ms,
                 max_objects_per_prompt=max_objects,
-                bootstrap_frames=_boot,
-                bootstrap_min_score=_boot_min,
-                periodic_rebootstrap_seconds=_periodic,
             )
 
         self._prompt_to_class_id = dict(zip(self._prompts, self._class_ids))
@@ -173,6 +166,7 @@ class Sam3InferenceNode(Node):
 
         self._bridge = CvBridge()
         self._infer_lock = threading.Lock()
+        self._runtime_closed = False
 
         self._pub = self.create_publisher(Image, '~/segmentation_mask', queue_depth)
         self._label_mask_pub = self.create_publisher(Image, '~/label_mask', queue_depth)
@@ -264,31 +258,49 @@ class Sam3InferenceNode(Node):
             response.success = False
             response.message = str(exc)
             return response
-        old_n = len(self._prompts)
-        new_n = len(prompts)
-        if new_n != old_n:
-            self.get_logger().warn(
-                f'Prompt count changed to {new_n}; there will be added latency '
-                'on the next image. Wait for a fresh ~/label_mask before '
-                'assuming the new prompts are live.'
+
+        # Session state belongs to the same single inference owner protected by
+        # _infer_lock. Wait for the current frame to finish before replacing it.
+        with self._infer_lock:
+            if self._runtime_closed:
+                response.success = False
+                response.message = 'SAM3 runtime is shutting down'
+                return response
+            old_n = len(self._prompts)
+            new_n = len(prompts)
+            if new_n != old_n:
+                self.get_logger().warn(
+                    f'Prompt count changed to {new_n}; there will be added '
+                    'latency on the next image. Wait for a fresh ~/label_mask '
+                    'before assuming the new prompts are live.'
+                )
+            self._live.reset_prompts(prompts)
+            self._prompts = prompts
+            self._class_ids = class_ids
+            self._prompt_to_class_id = dict(zip(prompts, class_ids))
+            self._publish_label_info()
+            mapping = ', '.join(
+                f'{name}={class_id}'
+                for name, class_id in zip(self._prompts, self._class_ids)
             )
-        self._live.reset_prompts(prompts)
-        self._prompts = prompts
-        self._class_ids = class_ids
-        self._prompt_to_class_id = dict(zip(prompts, class_ids))
-        self._publish_label_info()
-        mapping = ', '.join(f'{n}={c}' for n, c in zip(self._prompts, self._class_ids))
-        response.success = True
-        response.message = f'Prompts updated: {mapping}'
-        self.get_logger().info(response.message)
+            response.success = True
+            response.message = f'Prompts updated: {mapping}'
+            self.get_logger().info(response.message)
         return response
 
     def _on_enable(self, request, response):
-        self._enabled = request.data
-        state = 'enabled' if self._enabled else 'disabled'
-        self.get_logger().info(f'Inference {state}')
-        response.success = True
-        response.message = f'Inference {state}'
+        # Serializing this state change guarantees that a successful disable
+        # response is never followed by output from an older in-flight frame.
+        with self._infer_lock:
+            if self._runtime_closed:
+                response.success = False
+                response.message = 'SAM3 runtime is shutting down'
+                return response
+            self._enabled = request.data
+            state = 'enabled' if self._enabled else 'disabled'
+            self.get_logger().info(f'Inference {state}')
+            response.success = True
+            response.message = f'Inference {state}'
         return response
 
     def _on_image(self, msg: Image):
@@ -304,6 +316,10 @@ class Sam3InferenceNode(Node):
             return
 
         try:
+            # Enable state can change after the optimistic check above but
+            # before this callback acquires the lock.
+            if self._runtime_closed or not self._enabled:
+                return
             bgr = self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
             prompts = self._prompts
@@ -373,6 +389,24 @@ class Sam3InferenceNode(Node):
             f'Finished processing image with timestamp {msg.header.stamp.sec}.'
             f'{msg.header.stamp.nanosec}'
         )
+
+    def _close_runtime(self) -> None:
+        """Close the inference runtime once while no inference call is active."""
+        if self._runtime_closed:
+            return
+        try:
+            self._live.close()
+        finally:
+            self._runtime_closed = True
+
+    def destroy_node(self):
+        """Release inference workers before destroying ROS node resources."""
+        try:
+            with self._infer_lock:
+                self._close_runtime()
+        except Exception as exc:
+            self.get_logger().error(f'Failed to close SAM3 runtime: {exc}')
+        return super().destroy_node()
 
 
 def _color_for_class_id(class_id: int) -> np.ndarray:

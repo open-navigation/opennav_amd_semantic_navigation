@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Export memory_attention with FIXED spatial(7) + FIXED object-pointer slots(64).
+"""Export memory_attention with fixed spatial and object-pointer slots.
 
 Sam3VideoModel adds variable-length object pointers to the memory bank that
 the existing box-prompt `memory_attention_fixed_N7.onnx` (which bakes
 `num_object_pointer_tokens=0`) cannot consume. This script exports a
 padded variant:
 
-    memory shape: (7*HW + K, 1, 64)   K=64  →  steady state at frame 16+
+    memory shape: (S*HW + K, 1, 64)
     num_object_pointer_tokens=K       (excludes pointer slots from RoPE)
 
-Output: <onnx-dir>/tracker_modules/memory_attention_fixed_S7_P64.onnx
+Output: <onnx-dir>/tracker_modules/memory_attention_fixed_S{S}_P{K}.onnx
 """
 from __future__ import annotations
 import argparse
@@ -124,7 +124,7 @@ def main():
 
     print("\nDone. Next:")
     print(f"  - Wire MIGMemoryAttention shim that uses ORT MIG EP on {out_name}")
-    print(f"  - Pad pointer tokens to {args.ptr_tokens} at runtime; fall back to PT for early frames")
+    print(f"  - Pad pointer tokens to {args.ptr_tokens} at runtime")
 
 
 if __name__ == "__main__":

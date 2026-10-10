@@ -1,20 +1,31 @@
-# Install after completing Steps 1-2 in README (ROCm SDK + PyTorch + onnxruntime-migraphx).
+# Installed by setup.sh after the system ROCm and binary runtime are ready.
 #
-#   pip install -r requirements.txt
+# Keep versions in runtime-constraints.txt aligned with the validated rc4
+# environment. Torch, torchvision, Triton, ORT and the pinned colcon tooling
+# are installed separately.
 #
-# Verified with: torch==2.12.0a0+rocm7.13.0a20260411
+# Verified with: ROCm Debian packages==7.14.1-0
+#                rocm_sdk shim API==7.14.0
+#                MIGraphX==2.17.0.dev+2e9924db6
+#                torch==2.11.0+rocm7.13.0
 #                onnxruntime-migraphx==1.24.2
-#                rocm-sdk-core==7.13.0a20260411
 
 transformers>=5.8.0
+safetensors>=0.7
 onnx>=1.16
-onnx-simplifier>=0.4
+onnxsim>=0.7.3
 onnxconverter-common>=1.13
 opencv-python>=4.8
 numpy>=1.26,<2.0
+scipy>=1.17.1
 pillow>=10.0
 pycocotools>=2.0
 huggingface-hub>=0.20
 flatbuffers
 protobuf
-colcon-common-extensions
+networkx
+jinja2
+filelock
+fsspec
+sympy
+typing-extensions
