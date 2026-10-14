@@ -10,12 +10,11 @@ Autotuning runs ~3 minutes for 504px and ~9 minutes for 1008px the first
 time; the resulting .mxr is hardware-specific (gfx1151) and locked to the
 MIGraphX 2.17 build that produced it.
 
-The Conda activation hook installed by setup.sh selects the published
-MIGraphX binary prefix. Activate that environment before running standalone.
+Run it inside the Docker runtime image, which provides the pinned MIGraphX
+binary prefix:
 
-    conda activate opennav-sam3-inference
-    python export/backbone/compile_backbone_mxr.py --imgsz 504 \\
-        --onnx-dir onnx_files_504
+    ./docker/run.sh python export/backbone/compile_backbone_mxr.py \\
+        --imgsz 504 --onnx-dir /models/onnx_files_504
 """
 
 from __future__ import annotations

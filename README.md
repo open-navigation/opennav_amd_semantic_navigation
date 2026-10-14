@@ -178,31 +178,19 @@ Build the `opennav_sam3_msgs` package first since the following packages depends
 colcon build --packages-select opennav_sam3_msgs && source install/setup.bash
 ```
 
-Then build just the `opennav_sam3_inference` package inside the conda environment created by the setup script. By default it's `opennav-sam3-inference`.
-
-```bash
-conda activate opennav-sam3-inference
-colcon build --packages-select opennav_sam3_inference
-conda deactivate
-```
-
-Outside the conda environemnt, build everything else as usual while skipping just the `opennav_sam3_inference` package
+Then build the remaining packages, skipping `opennav_sam3_inference`, which is built and run inside the SAM3 Docker image:
 
 ```bash
 colcon build --packages-skip opennav_sam3_inference
 ```
 
-Now you can source the workspace as usual and launch the inference node, even outside of the conda environment!
-
-##### Rebuilding packages
-
-- Always build the inference package `opennav_sam3_inference` inside the conda environment.
-- Build everything else outside the conda environment excluding the inference package.
-
 ##### Run the inference stack
 
+The node runs in the SAM3 Docker image with Cyclone DDS, as the camera bringup of the reference platform ([`robot_bringup.service`](https://github.com/open-navigation/opennav_amd_demonstrations/blob/main/honeybee_bringup/systemd/robot_bringup.service)); see [`opennav_sam3_setup/docker/README.md`](opennav_sam3_setup/docker/README.md) for the host RMW and network settings.
+
 ```bash
-ros2 launch opennav_sam3_inference sam3_inference.launch.py
+cd <workspace-path>/src/opennav_amd_semantic_navigation/opennav_sam3_setup
+./docker/run_node.sh
 ```
 
 >If the camera color image and pointcloud are already aligned from the sensor, please add `sensor_processing_pipeline:=false` to 
