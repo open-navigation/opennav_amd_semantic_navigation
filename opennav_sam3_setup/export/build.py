@@ -5,8 +5,9 @@ Two pipelines, pick one or both:
 
   box   — SAM3OnnxTracker (demo.py): tracker modules + MIGraphX backbone
             ~10 min @504px / ~20 min @1008px
-  text  — Sam3VideoModel (demo_text.py --mig): detector backbone + DETR encoder
-            + padded memory_attention
+  text  — Sam3VideoModel (demo_text.py --mig): GPU-I/O detector backbone,
+            DETR encoder, shape-specialized memory attention, and optional
+            fixed 504px DETR decoder
             ~18 min @504px / ~30 min @1008px
 
 Usage:
@@ -118,7 +119,7 @@ def build_box(imgsz: int, args) -> bool:
                 sys.executable,
                 "export/backbone/export_backbone_single.py",
                 "--imgsz", str(imgsz),
-                "--onnx_dir", str(onnx_dir),
+                "--onnx-dir", str(onnx_dir),
                 "--backbone-source", "tracker",
                 "--checkpoint", str(args.checkpoint),
             ], "Export backbone ONNX (tracker FPN)")
@@ -203,7 +204,7 @@ def parse_args():
                    help="Rebuild even if output files already exist")
     p.add_argument("--steps", nargs="+", default=["all"],
                    help=("Limit to specific stages. Box: tracker_modules, backbone, prewarm. "
-                         "Text: backbone, detr_encoder, memory_attention."))
+                         "Text: backbone, detr_encoder, memory_attention, fixed_decoder."))
     p.add_argument("--ptr-tokens", type=int, default=None,  # 504→64, 1008→48
                    help="Pointer token slots for memory_attention. Default: 64 at 504px, 48 at 1008px (highest safe K per kernel cliff). Set explicitly to override.")
     return p.parse_args()

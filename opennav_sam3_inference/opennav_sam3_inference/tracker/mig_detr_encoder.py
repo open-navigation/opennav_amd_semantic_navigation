@@ -22,6 +22,8 @@ import onnxruntime as ort
 
 from transformers.models.sam3.modeling_sam3 import Sam3DETREncoderOutput
 
+from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
+
 
 def precompute_cross_attn_mask(text_mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     """(B, T) bool padding mask → (B, 1, 1, T) additive bias, broadcast over heads + queries."""
@@ -64,6 +66,10 @@ class MIGDetrEncoder(nn.Module):
         self.session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
         elapsed = time.perf_counter() - t0
         prov = self.session.get_providers()[0]
+        output = self.session.get_outputs()[0]
+        self.output_name = output.name
+        self.output_shape = tuple(int(dim) for dim in output.shape)
+        self._gpu_io_enabled = prov == 'MIGraphXExecutionProvider'
         # Detect the ONNX-compiled prompt seq_len so we can pad runtime
         # inputs to match. ONNX text_features shape: [1, seq_len, 256].
         ts_input = next(i for i in self.session.get_inputs() if i.name == "text_features")
@@ -144,14 +150,42 @@ class MIGDetrEncoder(nn.Module):
 
         cross_mask = precompute_cross_attn_mask(mig_text_mask, dtype)
 
-        # Run via ORT MIG EP (numpy fp32 in/out)
-        out_np = self.session.run(None, {
-            "vision_feature":  vision_feature.detach().float().cpu().numpy(),
-            "vision_pos":      vision_pos.detach().float().cpu().numpy(),
-            "text_features":   mig_text_features.detach().float().cpu().numpy(),
-            "cross_attn_mask": cross_mask.detach().float().cpu().numpy(),
-        })
-        last_hidden_state = torch.from_numpy(out_np[0]).to(device=device, dtype=dtype)
+        ort_inputs = {
+            'vision_feature': vision_feature,
+            'vision_pos': vision_pos,
+            'text_features': mig_text_features,
+            'cross_attn_mask': cross_mask,
+        }
+        if self._gpu_io_enabled and device.type == 'cuda':
+            try:
+                last_hidden_state = run_float32_gpu(
+                    self.session,
+                    ort_inputs,
+                    self.output_name,
+                    self.output_shape,
+                ).to(dtype=dtype)
+            except GpuIoExecutionError:
+                # Execution may already be in flight; a host retry could race
+                # the same ORT session and is not safe.
+                raise
+            except Exception as exc:
+                if not getattr(self, '_warned_gpu_io', False):
+                    print(f'  [MIGDetrEncoder] GPU I/O binding disabled: {exc}')
+                    self._warned_gpu_io = True
+                # Pre-submit binding failures are safe to retry. Keep the
+                # fallback permanent so every later call follows one path.
+                self._gpu_io_enabled = False
+        if not self._gpu_io_enabled or device.type != 'cuda':
+            out_np = self.session.run(
+                None,
+                {
+                    name: tensor.detach().float().cpu().numpy()
+                    for name, tensor in ort_inputs.items()
+                },
+            )
+            last_hidden_state = torch.from_numpy(out_np[0]).to(
+                device=device, dtype=dtype
+            )
 
         # Compute pos_embeds_flattened on host (cheap reshape — needed downstream)
         pos_flat = vision_pos.flatten(2).transpose(1, 2)

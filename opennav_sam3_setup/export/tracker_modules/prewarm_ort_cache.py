@@ -29,21 +29,8 @@ os.environ["ORT_LOG_SEVERITY_LEVEL"] = "4"
 
 import onnxruntime as ort
 
-# Direct MIGraphX Python API for the dec_/mem_ sessions further down.
-# Imported with alias `_mxr` so the name doesn't clash with the cache path
-# variable (`mxr_cache_path`) or the cache directory.  The bindings live at
-# /opt/rocm-7.2.x/lib (added to PYTHONPATH by the wrapping setup.sh).
-import sys
-import glob as _g, os as _o
-_rocm_lib = (
-    (_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-    if _o.path.isdir(_o.environ.get("ROCM_PATH", "").rstrip("/") + "/lib")
-    else next(
-        (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
-         if _o.path.isdir(p)), "/opt/rocm-7.2.0/lib"
-    )
-)
-sys.path.insert(0, _rocm_lib)
+# Direct MIGraphX Python API for the dec_/mem_ sessions further down. The
+# Conda activation hook installed by setup.sh supplies the binary prefix.
 import migraphx as _mxr
 
 
