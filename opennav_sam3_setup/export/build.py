@@ -3,11 +3,12 @@
 
 Two pipelines, pick one or both:
 
-  box   — SAM3OnnxTracker (demo.py): tracker modules + MIGraphX backbone
-            ~10 min @504px / ~20 min @1008px
-  text  — Sam3VideoModel (demo_text.py --mig): detector backbone + DETR encoder
-            + padded memory_attention
-            ~18 min @504px / ~30 min @1008px
+  box   — SAM3OnnxTracker (box-prompt tracker): tracker modules + MIGraphX
+            backbone, ~17 min @504px
+  text  — Sam3VideoModel (the ROS node): GPU-I/O detector backbone,
+            DETR encoder, shape-specialized memory attention with
+            autotuned caches, and the fixed 504px DETR decoder
+            ~20 min @504px
 
 Usage:
   # Box-prompt only (fastest, good first step)
@@ -19,14 +20,12 @@ Usage:
   # Everything at 504px
   python export/build.py --pipeline all --imgsz 504
 
-  # Both pipelines, both resolutions (~90 min total)
-  python export/build.py --pipeline all --imgsz 504 1008
-
   # Rebuild one stage only
-  python export/build.py --pipeline text --imgsz 1008 --steps backbone
-  python export/build.py --pipeline box  --imgsz 504  --force
+  python export/build.py --pipeline text --imgsz 504 --steps backbone
+  python export/build.py --pipeline box  --imgsz 504 --force
 
-Each step skips if its output already exists. Safe to re-run after interruption.
+Only 504px artifacts are supported. Each step skips if its output already
+exists. Safe to re-run after interruption.
 """
 from __future__ import annotations
 
@@ -118,7 +117,7 @@ def build_box(imgsz: int, args) -> bool:
                 sys.executable,
                 "export/backbone/export_backbone_single.py",
                 "--imgsz", str(imgsz),
-                "--onnx_dir", str(onnx_dir),
+                "--onnx-dir", str(onnx_dir),
                 "--backbone-source", "tracker",
                 "--checkpoint", str(args.checkpoint),
             ], "Export backbone ONNX (tracker FPN)")
@@ -144,7 +143,7 @@ def build_box(imgsz: int, args) -> bool:
                 "--imgsz", str(imgsz),
                 "--backbone-source", "tracker",
                 "--skip-verify",
-            ], f"Compile backbone .mxr  (~3 min @504 / ~9 min @1008)")
+            ], "Compile backbone .mxr  (~3 min @504)")
 
     # Step 5: prewarm direct-MIG caches
     if run_all or "prewarm" in steps:
@@ -174,7 +173,7 @@ def build_text(imgsz: int, args) -> bool:
         "--onnx-root", str(SAM3_MODEL_DIR),
     ]
     # Only forward --ptr-tokens if user explicitly set it; otherwise let
-    # build_text_prompt_mig.py pick the per-imgsz default (504→64, 1008→48).
+    # build_text_prompt_mig.py pick its default (64).
     if args.ptr_tokens is not None:
         cmd += ["--ptr-tokens", str(args.ptr_tokens)]
     if args.force:
@@ -196,16 +195,18 @@ def parse_args():
     p.add_argument("--pipeline", choices=["box", "text", "all"], default="box",
                    help="Which pipeline to build (default: box)")
     p.add_argument("--imgsz", type=int, nargs="+", default=[504],
-                   choices=[504, 1008],
-                   help="Resolution(s) to build (default: 504)")
+                   choices=[504],
+                   help="Resolution to build; only 504 is supported.")
     p.add_argument("--checkpoint", type=Path, default=SAM3_MODEL_DIR / "sam3")
     p.add_argument("--force", action="store_true",
                    help="Rebuild even if output files already exist")
     p.add_argument("--steps", nargs="+", default=["all"],
                    help=("Limit to specific stages. Box: tracker_modules, backbone, prewarm. "
-                         "Text: backbone, detr_encoder, memory_attention."))
-    p.add_argument("--ptr-tokens", type=int, default=None,  # 504→64, 1008→48
-                   help="Pointer token slots for memory_attention. Default: 64 at 504px, 48 at 1008px (highest safe K per kernel cliff). Set explicitly to override.")
+                         "Text: backbone, detr_encoder, memory_attention, fixed_decoder, "
+                         "prewarm."))
+    p.add_argument("--ptr-tokens", type=int, default=None,
+                   help="Pointer token slots for memory_attention. Default: 64. "
+                        "Set explicitly to override.")
     return p.parse_args()
 
 

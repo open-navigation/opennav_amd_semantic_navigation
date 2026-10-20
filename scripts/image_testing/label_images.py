@@ -114,8 +114,8 @@ def main():
                         help="ONNX artifact directory (default: onnx_files_504)")
     parser.add_argument("--device", default="cuda",
                         help="Torch device (default: cuda)")
-    parser.add_argument("--imgsz", type=int, default=504,
-                        help="Image resolution, 504 or 1008 (default: 504)")
+    parser.add_argument("--imgsz", type=int, default=504, choices=(504,),
+                        help="Image resolution; only 504 is supported (default: 504)")
     parser.add_argument("--score-threshold", type=float, default=0.5,
                         help="Minimum detection score (default: 0.5)")
     parser.add_argument("--no-mig", action="store_true",

@@ -39,9 +39,9 @@ def parse_args():
     )
     p.add_argument("--checkpoint", type=Path, default=WORKSPACE / "model" / "sam3")
     p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="Resolution root, e.g. onnx_files_504 or onnx_files_1008. "
+                   help="Resolution root, e.g. onnx_files_504. "
                         "Defaults based on --imgsz.")
-    p.add_argument("--imgsz", type=int, default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--opset", type=int, default=17)
     p.add_argument(
         "--backbone-source",

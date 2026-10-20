@@ -154,9 +154,6 @@ The following parameters are also provided:
 | `start_enabled` | `bool` | `true` | If `false`, the node loads and compiles the model but returns early from the image callback until `~/enable` is called with `data: true`. |
 | `max_objects_per_prompt` | `int` | `5` | Cap on simultaneously tracked objects per prompt. Excess (lowest score) are evicted via session.remove_object so the tracker stops propagating them. |
 | `redetect_interval_ms` | `double` | `1000.0` | Wall-clock interval between full SAM3 detections. `0` runs SAM3 on every frame (most accurate, slowest); `>0` runs SAM3 on keyframes every N ms with tracker propagation in between (recommended for multi-prompt). |
-| `bootstrap_frames` | `int` | `5` | Text-bootstrap → box-prompt: number of initial text-mode keyframes used to capture exemplar boxes, which are then injected as box prompts for stable multi-prompt tracking. `0` disables (pure text-prompt). |
-| `bootstrap_min_score` | `double` | `0.3` | Minimum detection score for a box to be captured as a bootstrap exemplar. |
-| `periodic_rebootstrap_seconds` | `double` | `180.0` | Force a re-bootstrap every N seconds wall-clock to catch scene changes the score-only drift signal cannot detect. `0` disables. |
 
 We want to especially thank Harry Sun at AMD for doing an incredible job with the SAM3 tracker implementation in collaboration with this work.
 
@@ -181,31 +178,19 @@ Build the `opennav_sam3_msgs` package first since the following packages depends
 colcon build --packages-select opennav_sam3_msgs && source install/setup.bash
 ```
 
-Then build just the `opennav_sam3_inference` package inside the conda environment created by the setup script. By default it's `opennav-sam3-inference`.
-
-```bash
-conda activate opennav-sam3-inference
-colcon build --packages-select opennav_sam3_inference
-conda deactivate
-```
-
-Outside the conda environemnt, build everything else as usual while skipping just the `opennav_sam3_inference` package
+Then build the remaining packages, skipping `opennav_sam3_inference`, which is built and run inside the SAM3 Docker image:
 
 ```bash
 colcon build --packages-skip opennav_sam3_inference
 ```
 
-Now you can source the workspace as usual and launch the inference node, even outside of the conda environment!
-
-##### Rebuilding packages
-
-- Always build the inference package `opennav_sam3_inference` inside the conda environment.
-- Build everything else outside the conda environment excluding the inference package.
-
 ##### Run the inference stack
 
+The node runs in the SAM3 Docker image with Cyclone DDS, as the camera bringup of the reference platform ([`robot_bringup.service`](https://github.com/open-navigation/opennav_amd_demonstrations/blob/main/honeybee_bringup/systemd/robot_bringup.service)); see [`opennav_sam3_setup/docker/README.md`](opennav_sam3_setup/docker/README.md) for the host RMW and network settings.
+
 ```bash
-ros2 launch opennav_sam3_inference sam3_inference.launch.py
+cd <workspace-path>/src/opennav_amd_semantic_navigation/opennav_sam3_setup
+./docker/run_node.sh
 ```
 
 >If the camera color image and pointcloud are already aligned from the sensor, please add `sensor_processing_pipeline:=false` to 

@@ -1,6 +1,6 @@
 # Install Dependencies and Setup SAM3
 
-Download a recent version of `conda` / `miniforge`. Check out [miniforge repo](https://github.com/conda-forge/miniforge) for installation steps. 
+Install Docker (with BuildKit, usable without `sudo`). SAM3 runs in a ROS 2 Jazzy / ROCm 10.1 / MIGraphX 2.18 Docker image built from official AMD packages and needs a `gfx1151` GPU (Strix Halo) with access to `/dev/kfd` and `/dev/dri`.
 
 Then clone this repository in your workspace source directory.
 
@@ -19,29 +19,23 @@ Change to `opennav_sam3_setup` directory inside the `src` directory of your work
 cd <workspace-path>/src/opennav_amd_semantic_navigation/opennav_sam3_setup
 ```
 
-Then run the `setup.sh` script in that directory to set up the Python, ROCm, and other important dependencies, including model weights:
+Then run the `setup.sh` script in that directory to build the SAM3 Docker image and get the model weights:
 
 ```bash
 ./setup.sh
 ```
 
-Without any modifiers, the script will install ROCm, migraphx, setup Python dependencies in `opennav-sam3-inference` conda environment, and downloads the model weights to `SAM3_MODEL_DIR` folder.
+Without any modifiers, the script builds the Docker image and downloads the model weights to `SAM3_MODEL_DIR` folder.
 
 >Note: The setup script provides two options to either obtain SAM3 weights from the official repository or from a community mirror, either of them works fine.
 
-Then build model artifacts for a specific resolution/pipeline which takes a few minutes.
+Then build the model artifacts (504 px, about 20 minutes):
 
 ```bash
-conda activate opennav-sam3-inference
-
-# Text-prompt (~18 min @504px)
-python export/build.py --pipeline text --imgsz 504
-
-# Both resolutions (~45 min total)
-python export/build.py --pipeline text --imgsz 504 1008
+./docker/run.sh python export/build.py --pipeline text --imgsz 504
 ```
 
-The script outputs files in the same `SAM3_MODEL_DIR` under `onnx_files_*` folder.
+The script outputs files in the same `SAM3_MODEL_DIR` under the `onnx_files_504` folder. Artifacts built with an earlier image (ROCm 7.14) cannot be loaded; move the old `onnx_files_504` folder away and build again.
 
 ## Setting up without the environment variable
 

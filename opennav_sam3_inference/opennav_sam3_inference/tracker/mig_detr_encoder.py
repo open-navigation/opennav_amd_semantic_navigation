@@ -22,6 +22,9 @@ import onnxruntime as ort
 
 from transformers.models.sam3.modeling_sam3 import Sam3DETREncoderOutput
 
+from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
+from .ort_plugin_ep import create_mig_session
+
 
 def precompute_cross_attn_mask(text_mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     """(B, T) bool padding mask → (B, 1, 1, T) additive bias, broadcast over heads + queries."""
@@ -51,19 +54,16 @@ class MIGDetrEncoder(nn.Module):
             Path(onnx_path).parent / "ort_cache"
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
-        providers = [
-            ("MIGraphXExecutionProvider", {
-                "migraphx_fp16_enable": "1",
-                "migraphx_model_cache_dir": str(cache_dir),
-            }),
-            "CPUExecutionProvider",
-        ]
-        print(f"  detr_encoder (ORT MIG EP, fp16): compiling from {Path(onnx_path).name} ...")
+        print(f"  detr_encoder (ORT MIG EP, fp16): opening {Path(onnx_path).name} ...")
         import time
         t0 = time.perf_counter()
-        self.session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
+        self.session = create_mig_session(onnx_path, opts, cache_dir)
         elapsed = time.perf_counter() - t0
         prov = self.session.get_providers()[0]
+        output = self.session.get_outputs()[0]
+        self.output_name = output.name
+        self.output_shape = tuple(int(dim) for dim in output.shape)
+        self._gpu_io_enabled = prov == 'MIGraphXExecutionProvider'
         # Detect the ONNX-compiled prompt seq_len so we can pad runtime
         # inputs to match. ONNX text_features shape: [1, seq_len, 256].
         ts_input = next(i for i in self.session.get_inputs() if i.name == "text_features")
@@ -144,14 +144,42 @@ class MIGDetrEncoder(nn.Module):
 
         cross_mask = precompute_cross_attn_mask(mig_text_mask, dtype)
 
-        # Run via ORT MIG EP (numpy fp32 in/out)
-        out_np = self.session.run(None, {
-            "vision_feature":  vision_feature.detach().float().cpu().numpy(),
-            "vision_pos":      vision_pos.detach().float().cpu().numpy(),
-            "text_features":   mig_text_features.detach().float().cpu().numpy(),
-            "cross_attn_mask": cross_mask.detach().float().cpu().numpy(),
-        })
-        last_hidden_state = torch.from_numpy(out_np[0]).to(device=device, dtype=dtype)
+        ort_inputs = {
+            'vision_feature': vision_feature,
+            'vision_pos': vision_pos,
+            'text_features': mig_text_features,
+            'cross_attn_mask': cross_mask,
+        }
+        if self._gpu_io_enabled and device.type == 'cuda':
+            try:
+                last_hidden_state = run_float32_gpu(
+                    self.session,
+                    ort_inputs,
+                    self.output_name,
+                    self.output_shape,
+                ).to(dtype=dtype)
+            except GpuIoExecutionError:
+                # Execution may already be in flight; a host retry could race
+                # the same ORT session and is not safe.
+                raise
+            except Exception as exc:
+                if not getattr(self, '_warned_gpu_io', False):
+                    print(f'  [MIGDetrEncoder] GPU I/O binding disabled: {exc}')
+                    self._warned_gpu_io = True
+                # Pre-submit binding failures are safe to retry. Keep the
+                # fallback permanent so every later call follows one path.
+                self._gpu_io_enabled = False
+        if not self._gpu_io_enabled or device.type != 'cuda':
+            out_np = self.session.run(
+                None,
+                {
+                    name: tensor.detach().float().cpu().numpy()
+                    for name, tensor in ort_inputs.items()
+                },
+            )
+            last_hidden_state = torch.from_numpy(out_np[0]).to(
+                device=device, dtype=dtype
+            )
 
         # Compute pos_embeds_flattened on host (cheap reshape — needed downstream)
         pos_flat = vision_pos.flatten(2).transpose(1, 2)
@@ -170,8 +198,9 @@ def patch_sam3_video_model_detr_encoder(model, onnx_path: Path) -> None:
     """In-place replace `model.detector_model.detr_encoder` with the ORT MIG EP shim.
 
     `onnx_path` should be the simplified .onnx (e.g.
-    `onnx_files_1008/detector_modules/detr_encoder_simplified.onnx`); the ORT
-    MIG EP compiles it on first use and caches the resulting .mxr next door.
+    `onnx_files_504/detector_modules/detr_encoder_simplified.onnx`); the build's
+    prewarm step compiles its MIGraphX cache next door, and the ORT MIG EP
+    loads that cache instead of compiling at startup.
 
     Call after `patch_sam3_video_model_with_mig` (or before — independent).
     """

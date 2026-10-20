@@ -38,11 +38,12 @@ def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--checkpoint", type=Path, default=Path("/home/amd/project/sam3/model/sam3"))
+    p.add_argument("--checkpoint", type=Path,
+                   default=Path(os.environ.get("SAM3_MODEL_DIR", ".")) / "sam3")
     p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="Resolution root (e.g. onnx_files_1008). Outputs go to "
+                   help="Resolution root (e.g. onnx_files_504). Outputs go to "
                         "<onnx-dir>/detector_modules/. Defaults from --imgsz.")
-    p.add_argument("--imgsz", type=int, default=1008)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--text-seq-len", type=int, default=32)
     p.add_argument("--opset", type=int, default=17)
     p.add_argument("--no-fp16", action="store_true",

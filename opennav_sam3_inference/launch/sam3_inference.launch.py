@@ -6,10 +6,9 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.actions import SetEnvironmentVariable
 
 
 def generate_launch_description():
@@ -25,21 +24,6 @@ def generate_launch_description():
     log_level = LaunchConfiguration('log_level')
 
     return LaunchDescription([
-        SetEnvironmentVariable(
-            name='LD_LIBRARY_PATH',
-            value=[
-                '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
-                '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0:',
-                EnvironmentVariable('LD_LIBRARY_PATH', default_value=''),
-            ],
-        ),
-        SetEnvironmentVariable(
-            name='PYTHONPATH',
-            value=[
-                '/opt/rocm-7.2.0/lib:',
-                EnvironmentVariable('PYTHONPATH', default_value=''),
-            ],
-        ),
         DeclareLaunchArgument(
             'params_file',
             default_value=default_params,
@@ -81,9 +65,6 @@ def generate_launch_description():
             remappings=[
                 ('~/image', image_topic),
             ],  
-            additional_env={
-                'LD_PRELOAD': '/opt/rocm-7.2.0/lib/libmigraphx_c.so.3:'
-                '/opt/rocm-7.2.0/lib/migraphx/lib/libmigraphx.so.2016000.0'},
             arguments=['--ros-args', '--log-level', log_level],
         ),
         IncludeLaunchDescription(

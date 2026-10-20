@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 """Compile simplified backbone ONNX to a MIGraphX .mxr cache with autotuning.
 
-Reads backbone_<source>/single_simplified.onnx and produces backbone_<source>/tuned.mxr —
-the runtime cache that tracker.py loads in ~3s instead of recompiling each
-session.
+Reads backbone_<source>/single_simplified.onnx and produces either
+backbone_<source>/tuned.mxr (host I/O) or tuned_gpuio.mxr (Torch GPU I/O).
+Both are runtime caches that load in seconds instead of recompiling each
+session; the GPU-I/O artifact is additive and never overwrites tuned.mxr.
 
-Autotuning runs ~3 minutes for 504px and ~9 minutes for 1008px the first
-time; the resulting .mxr is hardware-specific (gfx1151) and locked to the
-MIGraphX build that produced it (currently 2.15+patches.20260511).
+Autotuning runs ~3 minutes for 504px the first time; the resulting .mxr is
+hardware-specific (gfx1151) and tied to the MIGraphX build that produced it.
+When the runtime image changes, rebuild into a new artifact directory.
 
-Requires PYTHONPATH=/opt/rocm-7.2.x/lib so the patched migraphx Python
-binding loads. The wrapping setup.sh sets this; if running standalone:
+Run it inside the Docker runtime image (ROCm 10.1 / MIGraphX 2.18):
 
-    PYTHONPATH=/opt/rocm-7.2.x/lib${PYTHONPATH:+:$PYTHONPATH} \\
-        python export/backbone/compile_backbone_mxr.py --imgsz 504 --onnx-dir onnx_files_504
+    ./docker/run.sh python export/backbone/compile_backbone_mxr.py \\
+        --imgsz 504 --onnx-dir /models/onnx_files_504
 """
 
 from __future__ import annotations
 import argparse
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -34,7 +33,7 @@ def parse_args():
                    help="Resolution root (e.g. onnx_files_504). Reads "
                         "<onnx-dir>/backbone_<source>/single_simplified.onnx, writes "
                         "<onnx-dir>/backbone_<source>/tuned.mxr.")
-    p.add_argument("--imgsz", type=int, default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--backbone-source", choices=["tracker", "detector"],
                    default="tracker",
                    help="Which backbone subdir to operate on")
@@ -48,6 +47,11 @@ def parse_args():
         action="store_true",
         help="Skip post-compile output sanity check.",
     )
+    p.add_argument(
+        "--gpu-io",
+        action="store_true",
+        help="Compile with GPU-resident inputs/outputs and write tuned_gpuio.mxr.",
+    )
     return p.parse_args()
 
 
@@ -55,7 +59,7 @@ def main():
     args = parse_args()
     sub_dir = args.onnx_dir / f"backbone_{args.backbone_source}"
     src = sub_dir / "single_simplified.onnx"
-    dst = sub_dir / "tuned.mxr"
+    dst = sub_dir / ("tuned_gpuio.mxr" if args.gpu_io else "tuned.mxr")
 
     if not src.exists():
         raise FileNotFoundError(
@@ -71,33 +75,18 @@ def main():
     # must be set explicitly. Does not affect non-attention ops.
     os.environ.setdefault("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", "attention")
 
-    # Defer the import: it touches the dynamic linker and prints whatever
-    # warning the patched library emits.
-    # MIGraphX Python binding lives in /opt/rocm-7.2.x/lib — add it if not
-    # already on sys.path (e.g. when invoked as a subprocess without PYTHONPATH).
-    import glob as _g
-    _rocm_path = os.environ.get("ROCM_PATH", "").rstrip("/")
-    _mxr_lib = (
-        (_rocm_path + "/lib")
-        if _rocm_path and os.path.isdir(_rocm_path + "/lib")
-        else next(
-            (p for p in sorted(_g.glob("/opt/rocm-7.2.*/lib"), reverse=True)
-             if os.path.isdir(p)), "/opt/rocm-7.2.0/lib"
-        )
-    )
-    if _mxr_lib not in sys.path:
-        sys.path.insert(0, _mxr_lib)
+    # Defer the import until after compile-specific environment flags are set.
     import migraphx
 
     print(f"migraphx from: {migraphx.__file__}")
     print(f"Compiling {src} ...")
-    print(f"  (autotuning enabled — first run takes ~3 min @504px / ~9 min @1008px)")
+    print("  (autotuning enabled — first run takes ~3 min @504px)")
 
     t0 = time.perf_counter()
     prog = migraphx.parse_onnx(str(src))
     if not args.no_fp16:
         migraphx.quantize_fp16(prog)
-    prog.compile(migraphx.get_target("gpu"), offload_copy=True)
+    prog.compile(migraphx.get_target("gpu"), offload_copy=not args.gpu_io)
     elapsed = time.perf_counter() - t0
     print(f"  Compiled in {elapsed:.0f}s")
 
@@ -106,6 +95,22 @@ def main():
     print(f"  Saved: {dst}  ({size_mb:.0f} MB)")
 
     if args.skip_verify:
+        return
+
+    if args.gpu_io:
+        print("\n[verify] Running GPU-resident backbone ...")
+        params = {
+            name: migraphx.to_gpu(migraphx.generate_argument(shape))
+            for name, shape in prog.get_parameter_shapes().items()
+        }
+        outs = prog.run(params)
+        migraphx.gpu_sync()
+        for i, output in enumerate(outs):
+            array = np.array(migraphx.from_gpu(output))
+            if not np.isfinite(array).all():
+                raise SystemExit(f"GPU output {i} contains non-finite values")
+            print(f"  output_{i}: shape={array.shape} finite=True")
+        print("  OK — GPU-resident inputs and outputs are valid")
         return
 
     print("\n[verify] Running compiled backbone, checking outputs are C-contiguous ...")
@@ -123,8 +128,9 @@ def main():
         print(f"  fpn_{i}: shape={a.shape} C_contiguous={c}")
     if not all_ok:
         raise SystemExit(
-            "Outputs are NOT C-contiguous — patched MIGraphX (NHWC fix) is "
-            "not in effect. Reinstall via tools/install_migraphx_patched.sh."
+            f"Outputs are NOT C-contiguous; do not use the saved cache {dst}. "
+            "Check the printed migraphx module path and rebuild inside the "
+            "ROCm 10.1 / MIGraphX 2.18 Docker image (docker/run.sh)."
         )
     print("  OK — all outputs C-contiguous")
 

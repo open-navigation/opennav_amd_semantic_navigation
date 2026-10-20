@@ -16,7 +16,7 @@ Key design decisions:
 Usage:
     PYTHONPATH not required (transformers>=5.8.0 includes sam3_tracker_video)\
         python export/tracker_modules/export_tracker_modules.py \\
-        [--onnx-dir onnx_files_1008] [--imgsz 1008] [--opset 17] [--verify]
+        [--onnx-dir onnx_files_504] [--imgsz 504] [--opset 17] [--verify]
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--onnx-dir", type=Path, default=None,
                    help="Resolution root (e.g. onnx_files_504). Outputs go to "
                         "<onnx-dir>/tracker_modules/. Defaults based on --imgsz.")
-    p.add_argument("--imgsz", type=int, default=1008)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--checkpoint", type=Path, default=LOCAL_HF_MODEL)
     p.add_argument("--opset", type=int, default=17)
     p.add_argument("--verify", action="store_true", help="Run CPU accuracy test after export")
