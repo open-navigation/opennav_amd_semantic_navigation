@@ -60,9 +60,11 @@ def _bgr_to_pil(bgr: np.ndarray) -> Image.Image:
     return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
 
 
-# Memory-attention pointer-token cap per resolution (must match
-# memory_attention_fixed_S7_P{K}.onnx artifact that was compiled by build.py).
-_K_PER_IMGSZ = {504: 64, 1008: 48}
+# Memory-attention pointer-token cap (must match the
+# memory_attention_fixed_S{N}_P{K}.onnx artifacts compiled by build.py).
+_MEMORY_POINTER_TOKENS = 64
+# The live runtime refuses to fall back to PyTorch for any of these shapes.
+_REQUIRED_MEMORY_ATTENTION_SLOTS = tuple(range(1, 11))
 
 
 class SAM3Live:
@@ -81,7 +83,7 @@ class SAM3Live:
         prompts: Sequence[str],
         *,
         onnx_dir: str | Path | None = None,
-        imgsz: int = 1008,
+        imgsz: int = 504,
         dtype: torch.dtype = torch.float16,
         device: str | torch.device | None = None,
         mig: bool = False,
@@ -97,7 +99,7 @@ class SAM3Live:
             checkpoint: HF model dir (contains model.safetensors).
             prompts: initial text prompts (e.g. ["car", "sidewalk"]).
             onnx_dir: required if ``mig=True`` (e.g. ``onnx_files_504``).
-            imgsz: 504 or 1008. Must match the MIG artifacts under ``onnx_dir``.
+            imgsz: only 504 is supported. Must match the artifacts under ``onnx_dir``.
             dtype: fp16 (default) or fp32.
             device: torch device, defaults to cuda if available.
             mig: enable MIGraphX accelerated paths (vision encoder, DETR encoder,
@@ -139,6 +141,8 @@ class SAM3Live:
                 - ``None``: unlimited — only safe when you know the scene's
                   true object count is small (e.g. single tracked target).
         """
+        if imgsz != 504:
+            raise ValueError('SAM3Live supports only the validated 504px resolution')
         # Lazy import so that consumers of this module don't pay model import cost
         # if they only want the class definition.
         from transformers import Sam3VideoModel, AutoProcessor, Sam3VideoConfig
@@ -277,8 +281,7 @@ class SAM3Live:
                 f'({fixed_decoder_mxr.name})'
             )
 
-        # K is resolution-dependent (MLIR attention perf cliff).
-        k = _K_PER_IMGSZ.get(imgsz, 32)
+        k = _MEMORY_POINTER_TOKENS
         mem_attn_onnx = onnx_dir / "tracker_modules" / f"memory_attention_fixed_S7_P{k}.onnx"
         if not mem_attn_onnx.exists():
             for alt in (32, 48, 64, 16, 4):
@@ -288,8 +291,19 @@ class SAM3Live:
                     break
         if mem_attn_onnx.exists():
             from .mig_memory_attention import patch_sam3_video_model_memory_attention
-            patch_sam3_video_model_memory_attention(self.model, mem_attn_onnx)
+            patch_sam3_video_model_memory_attention(
+                self.model,
+                mem_attn_onnx,
+                required_spatial_slots=_REQUIRED_MEMORY_ATTENTION_SLOTS,
+                allow_pytorch_fallback=False,
+            )
             print(f"  memory_attention MIG ready ({mem_attn_onnx.name})")
+        else:
+            raise FileNotFoundError(
+                'MIG memory-attention artifact not found for '
+                f'imgsz={imgsz}, pointer-token candidates={(k, 32, 48, 64, 16, 4)} '
+                f"under {onnx_dir / 'tracker_modules'}"
+            )
 
         # Apply the batched mask-decoder patch unless explicitly disabled for
         # diagnosis. The patch preserves the native propagation semantics.

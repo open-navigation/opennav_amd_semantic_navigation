@@ -84,12 +84,12 @@ def _write_artifact_family(directory, ptr_tokens):
 def _mock_sessions(monkeypatch, module):
     loaded = []
 
-    def make_session(path, sess_options, providers):
+    def make_session(path, sess_options, cache_dir):
         assert sess_options is not None
-        assert providers[0][0] == 'MIGraphXExecutionProvider'
+        assert Path(cache_dir).name == 'ort_cache_mem_attn'
         return _FakeSession(path, loaded)
 
-    monkeypatch.setattr(module.ort, 'InferenceSession', make_session)
+    monkeypatch.setattr(module, 'create_mig_session', make_session)
     return loaded
 
 
@@ -184,6 +184,72 @@ def test_missing_spatial_shape_preserves_pytorch_fallback(
     assert len(fallbacks) == 1
     assert shim._mig_calls == 0
     assert shim._pt_fallback_calls == 1
+
+
+def test_required_slots_refuse_incomplete_coverage(
+    memory_runtime, monkeypatch, tmp_path
+):
+    module = memory_runtime.module
+    _mock_sessions(monkeypatch, module)
+    monkeypatch.setattr(
+        _FakeSession, 'get_providers', lambda self: ['MIGraphXExecutionProvider']
+    )
+    for slots in range(1, 10):
+        (tmp_path / f'memory_attention_fixed_S{slots}_P64.onnx').touch()
+
+    with pytest.raises(RuntimeError, match='missing S=\\[10\\]'):
+        module.MIGMemoryAttention(
+            tmp_path / 'memory_attention_fixed_S7_P64.onnx',
+            original_forward=lambda **_kwargs: None,
+            required_spatial_slots=range(1, 11),
+            allow_pytorch_fallback=False,
+        )
+
+
+def test_required_slots_refuse_non_mig_sessions(memory_runtime, monkeypatch, tmp_path):
+    module = memory_runtime.module
+    _mock_sessions(monkeypatch, module)
+    paths = _write_artifact_family(tmp_path, 64)
+
+    with pytest.raises(RuntimeError, match='did not select MIGraphXExecutionProvider'):
+        module.MIGMemoryAttention(
+            paths[6],
+            original_forward=lambda **_kwargs: None,
+            required_spatial_slots=range(1, 11),
+        )
+
+
+def test_disabled_pytorch_fallback_raises_for_an_unserved_shape(
+    memory_runtime, monkeypatch, tmp_path
+):
+    module = memory_runtime.module
+    torch = memory_runtime.torch
+    _mock_sessions(monkeypatch, module)
+    monkeypatch.setattr(
+        _FakeSession, 'get_providers', lambda self: ['MIGraphXExecutionProvider']
+    )
+    paths = _write_artifact_family(tmp_path, 64)
+
+    def unexpected_fallback(**_kwargs):
+        pytest.fail('the PyTorch fallback is disabled')
+
+    shim = module.MIGMemoryAttention(
+        paths[6],
+        unexpected_fallback,
+        required_spatial_slots=range(1, 11),
+        allow_pytorch_fallback=False,
+    )
+    current = torch.zeros((4, 1, 256), dtype=torch.float32)
+    memory = torch.zeros((11 * 4 + 3, 1, 64), dtype=torch.float32)
+
+    with pytest.raises(RuntimeError, match='fallback is disabled'):
+        shim(
+            current_vision_features=current,
+            memory=memory,
+            current_vision_position_embeddings=torch.zeros_like(current),
+            memory_posision_embeddings=torch.zeros_like(memory),
+            num_object_pointer_tokens=3,
+        )
 
 
 def test_over_capacity_keeps_conditioning_and_newest_pointer_tokens(

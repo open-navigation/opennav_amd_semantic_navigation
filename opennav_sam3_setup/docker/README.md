@@ -1,13 +1,15 @@
-# SAM3 Docker runtime (ROCm 7.14 / MIGraphX 2.17 / ORT 1.24.2)
+# SAM3 Docker runtime (ROS 2 Jazzy / ROCm 10.1 / MIGraphX 2.18 / ORT 1.29)
 
-Built by `../setup.sh` from checksum-pinned binaries. The image holds the GPU
-runtime and ROS 2 Jazzy; weights and model artifacts stay in `SAM3_MODEL_DIR`.
+Built by `../setup.sh` on the official `ros:jazzy-ros-base` image from AMD's
+ROCm 10.1 apt packages and checksum-pinned official wheels (Torch 2.14,
+MIGraphX 2.18, the ONNX Runtime MIGraphX plugin EP) plus ONNX Runtime 1.29 from
+PyPI. Weights and model artifacts stay in `SAM3_MODEL_DIR`.
 
 | Script | Purpose |
 |---|---|
 | `build.sh` | Build the image and run a GPU check (called by `setup.sh`) |
 | `run.sh <cmd>` | Run a command in the image (repo at `/workspace`, `SAM3_MODEL_DIR` at `/models`) |
-| `run_node.sh` | Build the ROS packages on first use and launch the SAM3 node |
+| `run_node.sh` | Build the ROS packages (first use, or after the image or package sources change) and launch the SAM3 node |
 
 ```bash
 ./docker/run_node.sh [--build] [launch args...]
@@ -36,5 +38,8 @@ and `CYCLONEDDS_URI` (a host file is mounted) are forwarded.
   from the reference platform's
   [robot computer setup](https://github.com/open-navigation/opennav_amd_demonstrations/blob/main/docs/bootstrapping_robot_computer.md).
 - **Keep `PYTORCH_HIP_ALLOC_CONF=expandable_segments:False`** (set in the
-  image); `expandable_segments:True` hangs the first GPU operation with this
-  Torch / ROCm 7.14 build.
+  image); `expandable_segments:True` hangs the first GPU model upload with this
+  Torch / ROCm build.
+- **Rebuild model artifacts after changing the image.** MXR files and ONNX
+  Runtime caches only load with the MIGraphX build that produced them; build
+  into a new empty `onnx_files_504` folder.

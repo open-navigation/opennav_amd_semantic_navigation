@@ -28,6 +28,7 @@ from .migraphx_runtime import (  # noqa: F401
     preprocess_image,
     retarget_resolution,
 )
+from .ort_plugin_ep import create_mig_session
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +107,7 @@ class SAM3OnnxTracker:
     Args:
         checkpoint:   Path to facebook/sam3 model directory.
         onnx_dir:     Directory containing the exported ONNX files.
-        imgsz:        Input resolution (default 504; use 1008 for higher quality).
+        imgsz:        Input resolution (504; the build only produces 504 px artifacts).
         num_maskmem:  Memory bank size (default 7).
         backbone:     "auto" (default) — use MIGraphX if cache/onnx present, else PyTorch.
                       "migraphx"       — require MIGraphX backbone (88ms at 504px).
@@ -233,27 +234,17 @@ class SAM3OnnxTracker:
         cpu_opts.inter_op_num_threads = 1
         cpu_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-        CPU = ["CPUExecutionProvider"]
-
-        # MIGraphX provider helpers with persistent compile cache.
-        # Cache key includes model hash + fp16 flag, so FP16 and FP32 variants are stored
-        # separately. Run export/tracker_modules/prewarm_ort_cache.py once per onnx_dir to populate.
+        # Persistent MIGraphX compile cache. Cache key includes model hash + fp16 flag,
+        # so FP16 and FP32 variants are stored separately. Run
+        # export/tracker_modules/prewarm_ort_cache.py once per onnx_dir to populate.
         _cache = str(modules_dir / "mxr_cache")
-        def _mig(fp16: bool = False) -> list:
-            opts: dict = {"migraphx_model_cache_dir": _cache}
-            if fp16:
-                opts["migraphx_fp16_enable"] = "1"
-            return [("MIGraphXExecutionProvider", opts), ("CPUExecutionProvider", {})]
-
-        MIG     = _mig(fp16=False)
-        MIG_FP16 = _mig(fp16=True)
 
         # FP16 memory_attention is 2.76× faster and numerically safe (max_diff=0.012).
         # With a pre-compiled cache, FP16 is used at ALL resolutions (no OOM risk:
         # cache loading does not trigger GPU compilation workspace allocation).
         # Without a cache, FP16 at 1008px OOMs with backbone in memory → fall back to FP32.
         _cache_exists = any(Path(_cache).glob("*")) if Path(_cache).exists() else False
-        _attn_prov = MIG_FP16 if (_cache_exists or self.HW <= 2000) else MIG
+        _attn_fp16 = _cache_exists or self.HW <= 2000
 
         # ---- Load ONNX modules via direct migraphx Python API ----
         # Direct API eliminates ORT EP's ReorderInput/Output CPU overhead (NCHW↔NCHWc),
@@ -279,13 +270,13 @@ class SAM3OnnxTracker:
         self.mem_enc  = _mig_direct(
             modules_dir / "memory_encoder.onnx", "mem_enc_fp32.mxr", "memory_encoder")
 
-        # memory_attention: ORT MIGraphX EP.
+        # memory_attention: ORT MIGraphX plugin EP.
         # NOTE: direct MIGraphX Python API produces numerically wrong cond output
         # (max_diff~6.7 vs CPU ORT reference) for this model — root cause is a
         # MIGraphX compiler difference for this specific attention architecture.
-        # ORT MIGraphX EP gives correct results. At 1008px with backbone in GPU
-        # memory, ORT EP may fall back to CPU (silent); acceptable since this
-        # module contributes <10% of total latency. FP16 via migraphx_fp16_enable.
+        # ORT MIGraphX EP gives correct results. create_mig_session raises if any
+        # node is not assigned to MIGraphX, so there is no silent CPU fallback.
+        # FP16 via migraphx_fp16_enable.
         mem_attn_fixed  = modules_dir / "memory_attention_fixed_N7.onnx"
         if mem_attn_fixed.exists():
             ort_opts = ort.SessionOptions()
@@ -294,27 +285,17 @@ class SAM3OnnxTracker:
             # First run: ~5 min compilation → cache saved. Subsequent: ~1.3s load from cache.
             _ort_cache_dir = modules_dir / "ort_mig_cache"
             _ort_cache_dir.mkdir(parents=True, exist_ok=True)
-            _attn_prov_cached = []
-            for (pname, popts) in _attn_prov:
-                if pname == "MIGraphXExecutionProvider":
-                    popts = dict(popts, migraphx_model_cache_dir=str(_ort_cache_dir))
-                _attn_prov_cached.append((pname, popts))
-            try:
-                self.mem_attn = ort.InferenceSession(
-                    str(mem_attn_fixed), providers=_attn_prov_cached, sess_options=ort_opts)
-                # Check which provider actually ran
-                prov = self.mem_attn.get_providers()[0]
-                fp16_on = "FP16" if _attn_prov == MIG_FP16 else ""
-                print(f"  memory_attention (ORT {prov[:3]} {fp16_on}): loaded")
-            except Exception as e:
-                self.mem_attn = ort.InferenceSession(str(mem_attn_fixed), providers=CPU)
-                print(f"  memory_attention: CPU fallback ({str(e)[:50]})")
+            # Raises instead of silently running on CPU if any node is not on MIGraphX.
+            self.mem_attn = create_mig_session(
+                mem_attn_fixed, ort_opts, _ort_cache_dir, fp16=_attn_fp16)
+            prov = self.mem_attn.get_providers()[0]
+            fp16_on = "FP16" if _attn_fp16 else ""
+            print(f"  memory_attention (ORT {prov[:3]} {fp16_on}): loaded")
             self._mem_attn_slots = num_maskmem
         else:
-            self.mem_attn = ort.InferenceSession(
-                str(modules_dir / "memory_attention.onnx"), providers=CPU)
-            self._mem_attn_slots = 0
-            print("  memory_attention: CPU (dynamic) — export fixed_N7 for MIGraphX speedup")
+            raise FileNotFoundError(
+                f"fixed memory-attention module not found: {mem_attn_fixed}; "
+                "re-export the tracker modules (there is no CPU fallback)")
 
         self.memory_bank = MemoryBank(temporal_pe, max_slots=num_maskmem)
         self._frame_idx  = 0

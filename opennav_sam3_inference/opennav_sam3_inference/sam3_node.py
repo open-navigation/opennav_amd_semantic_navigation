@@ -112,6 +112,12 @@ class Sam3InferenceNode(Node):
         )
 
         imgsz = _infer_imgsz(onnx_dir)
+        if imgsz != 504:
+            raise RuntimeError(
+                f'ONNX files directory {onnx_dir} is for {imgsz} px; only 504 px '
+                'artifacts are supported. Build onnx_files_504 with '
+                'export/build.py --pipeline text --imgsz 504.'
+            )
 
         self.get_logger().info(
             f'Loading SAM3 from {checkpoint} on {device} '

@@ -13,13 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Resolve the gfx1151 PyTorch wheel against the system ROCm installation.
+"""Resolve the PyTorch wheel against the system ROCm installation.
 
-AMD's gfx1151 PyTorch wheel is built against ROCm 7.13 and normally imports
-ROCm libraries from Python wheels. OpenNav uses the ABI-compatible system
-ROCm 7.14 libraries instead, selected through ``ROCM_PATH``. The 7.14.1-0
-Debian package set exposes the 7.14.0 API version below; both values match the
-validated rc4 container.
+AMD's ROCm 10.1 PyTorch wheel normally preloads ROCm libraries from Python
+wheels. The container supplies the same-version ROCm 10.1 libraries from the
+10.1.0-3 Debian packages, selected through ``ROCM_PATH``. Skipping that
+preload avoids importing a second, wheel-supplied ROCm stack.
 """
 
 import glob
@@ -27,7 +26,7 @@ import os
 from pathlib import Path
 
 
-__version__ = "7.14.0"
+__version__ = "10.1.0"
 
 
 def initialize_process(**_kwargs):

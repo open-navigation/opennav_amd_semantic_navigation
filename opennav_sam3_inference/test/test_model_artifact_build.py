@@ -53,6 +53,12 @@ def _capture_runs(monkeypatch):
     return calls
 
 
+def _assert_full_autotune(env):
+    assert env is not None
+    assert 'MIGRAPHX_SKIP_BENCHMARKING' not in env
+    assert 'MIGRAPHX_MLIR_USE_SPECIFIC_OPS' not in env
+
+
 def test_backbone_build_keeps_host_artifact_and_adds_gpu_io(monkeypatch, tmp_path):
     probes = []
 
@@ -60,7 +66,7 @@ def test_backbone_build_keeps_host_artifact_and_adds_gpu_io(monkeypatch, tmp_pat
         probes.append((path, label, force))
         return path.name != 'tuned_gpuio.mxr'
 
-    monkeypatch.delenv('ROCMLIR_SINK_FINAL_ERF', raising=False)
+    monkeypatch.setenv('MIGRAPHX_SKIP_BENCHMARKING', '1')
     monkeypatch.setattr(build, 'exists', fake_exists)
     calls = _capture_runs(monkeypatch)
 
@@ -74,23 +80,34 @@ def test_backbone_build_keeps_host_artifact_and_adds_gpu_io(monkeypatch, tmp_pat
     assert len(calls) == 1
     command, _, env = calls[0]
     assert '--gpu-io' in command
-    assert env['ROCMLIR_SINK_FINAL_ERF'] == '1'
-    assert 'ROCMLIR_SINK_FINAL_ERF' not in os.environ
+    _assert_full_autotune(env)
+    assert os.environ['MIGRAPHX_SKIP_BENCHMARKING'] == '1'
 
 
-def test_memory_attention_builds_each_shape(monkeypatch, tmp_path):
+def test_build_does_not_set_custom_compiler_flags():
+    # ROCMLIR_SINK_FINAL_ERF only affected the earlier custom MIGraphX build.
+    assert 'ROCMLIR_SINK_FINAL_ERF' not in BUILD_SCRIPT.read_text()
+
+
+def test_memory_attention_exports_each_shape_then_autotunes(monkeypatch, tmp_path):
+    monkeypatch.setenv('MIGRAPHX_SKIP_BENCHMARKING', '1')
     monkeypatch.setattr(build, 'exists', lambda path, label, force: False)
     calls = _capture_runs(monkeypatch)
 
     args = _args(tmp_path, ['memory_attention'], max_spatial_slots=10)
     assert build.build_for_imgsz(504, args)
-    assert len(calls) == 10
+    assert len(calls) == 11
     spatial_slots = []
-    for command, _, env in calls:
+    for command, _, env in calls[:10]:
         assert env is None
         index = command.index('--spatial-slots')
         spatial_slots.append(int(command[index + 1]))
     assert spatial_slots == list(range(1, 11))
+    command, _, env = calls[10]
+    assert command[1] == 'export/tracker_modules/compile_memory_attention.py'
+    assert command[command.index('--ptr-tokens') + 1] == '64'
+    assert command[command.index('--max-spatial-slots') + 1] == '10'
+    _assert_full_autotune(env)
 
 
 def test_fixed_decoder_build_invokes_export_then_compile(monkeypatch, tmp_path):
@@ -105,15 +122,25 @@ def test_fixed_decoder_build_invokes_export_then_compile(monkeypatch, tmp_path):
     assert calls[0][0][1] == 'export/detector/export_fixed_detr_decoder.py'
     assert calls[1][0][1] == 'export/detector/compile_fixed_detr_decoder.py'
     assert calls[1][0][-1] == '--force'
+    _assert_full_autotune(calls[1][2])
 
 
-def test_fixed_decoder_1008_policy(monkeypatch, tmp_path):
-    monkeypatch.setattr(build, 'exists', lambda path, label, force: True)
+def test_prewarm_runs_the_runtime_once_with_autotuning(monkeypatch, tmp_path):
     calls = _capture_runs(monkeypatch)
 
-    assert build.build_for_imgsz(1008, _args(tmp_path, ['all']))
-    assert calls == []
-    assert not build.build_for_imgsz(1008, _args(tmp_path, ['fixed_decoder']))
+    assert build.build_for_imgsz(504, _args(tmp_path, ['prewarm']))
+    assert len(calls) == 1
+    command, _, env = calls[0]
+    assert command[1] == 'export/prewarm_runtime_caches.py'
+    assert command[command.index('--onnx-dir') + 1] == str(tmp_path / 'onnx_files_504')
+    _assert_full_autotune(env)
+
+
+def test_only_504px_is_built(monkeypatch, tmp_path):
+    monkeypatch.setattr(build, 'exists', lambda path, label, force: False)
+    calls = _capture_runs(monkeypatch)
+
+    assert not build.build_for_imgsz(1008, _args(tmp_path, ['all']))
     assert calls == []
 
 

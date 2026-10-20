@@ -1,14 +1,16 @@
-# Installed by setup.sh after the system ROCm and binary runtime are ready.
+# Installed by docker/Dockerfile on top of the official ROCm 10.1 wheels
+# (torch, migraphx, onnxruntime-ep-migraphx, onnxruntime 1.29).
 #
-# Keep versions in runtime-constraints.txt aligned with the validated rc4
-# environment. Torch, torchvision, Triton, ORT and the pinned colcon tooling
-# are installed separately.
+# Keep versions in runtime-constraints.txt aligned with the validated
+# environment. Torch, torchvision, Triton, MIGraphX and ORT are installed
+# separately; colcon comes from the ROS 2 Jazzy base image.
 #
-# Verified with: ROCm Debian packages==7.14.1-0
-#                rocm_sdk shim API==7.14.0
-#                MIGraphX==2.17.0.dev+2e9924db6
-#                torch==2.11.0+rocm7.13.0
-#                onnxruntime-migraphx==1.24.2
+# Verified with: ROCm Debian packages==10.1.0-3
+#                rocm_sdk shim API==10.1.0
+#                torch==2.14.0+rocm10.1.0
+#                migraphx==2.18.0+rocm10.1.0
+#                onnxruntime==1.29.0
+#                onnxruntime-ep-migraphx==1.0.0+rocm10.1.0
 
 transformers>=5.8.0
 safetensors>=0.7

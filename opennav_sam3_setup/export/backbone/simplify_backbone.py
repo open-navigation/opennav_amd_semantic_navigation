@@ -29,7 +29,7 @@ def parse_args():
                    help="Resolution root (e.g. onnx_files_504). Reads "
                         "<onnx-dir>/backbone_<source>/single_fp32.onnx, writes "
                         "<onnx-dir>/backbone_<source>/single_simplified.onnx.")
-    p.add_argument("--imgsz", type=int, default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--backbone-source", choices=["tracker", "detector"],
                    default="tracker",
                    help="Which backbone subdir to operate on")

@@ -6,12 +6,11 @@ backbone_<source>/tuned.mxr (host I/O) or tuned_gpuio.mxr (Torch GPU I/O).
 Both are runtime caches that load in seconds instead of recompiling each
 session; the GPU-I/O artifact is additive and never overwrites tuned.mxr.
 
-Autotuning runs ~3 minutes for 504px and ~9 minutes for 1008px the first
-time; the resulting .mxr is hardware-specific (gfx1151) and locked to the
-MIGraphX 2.17 build that produced it.
+Autotuning runs ~3 minutes for 504px the first time; the resulting .mxr is
+hardware-specific (gfx1151) and tied to the MIGraphX build that produced it.
+When the runtime image changes, rebuild into a new artifact directory.
 
-Run it inside the Docker runtime image, which provides the pinned MIGraphX
-binary prefix:
+Run it inside the Docker runtime image (ROCm 10.1 / MIGraphX 2.18):
 
     ./docker/run.sh python export/backbone/compile_backbone_mxr.py \\
         --imgsz 504 --onnx-dir /models/onnx_files_504
@@ -34,7 +33,7 @@ def parse_args():
                    help="Resolution root (e.g. onnx_files_504). Reads "
                         "<onnx-dir>/backbone_<source>/single_simplified.onnx, writes "
                         "<onnx-dir>/backbone_<source>/tuned.mxr.")
-    p.add_argument("--imgsz", type=int, default=504)
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--backbone-source", choices=["tracker", "detector"],
                    default="tracker",
                    help="Which backbone subdir to operate on")
@@ -77,12 +76,11 @@ def main():
     os.environ.setdefault("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", "attention")
 
     # Defer the import until after compile-specific environment flags are set.
-    # setup.sh's Conda activation hook supplies the binary prefix.
     import migraphx
 
     print(f"migraphx from: {migraphx.__file__}")
     print(f"Compiling {src} ...")
-    print(f"  (autotuning enabled — first run takes ~3 min @504px / ~9 min @1008px)")
+    print("  (autotuning enabled — first run takes ~3 min @504px)")
 
     t0 = time.perf_counter()
     prog = migraphx.parse_onnx(str(src))
@@ -130,8 +128,9 @@ def main():
         print(f"  fpn_{i}: shape={a.shape} C_contiguous={c}")
     if not all_ok:
         raise SystemExit(
-            "Outputs are NOT C-contiguous; verify the published MIGraphX 2.17 "
-            "runtime prefix is active."
+            f"Outputs are NOT C-contiguous; do not use the saved cache {dst}. "
+            "Check the printed migraphx module path and rebuild inside the "
+            "ROCm 10.1 / MIGraphX 2.18 Docker image (docker/run.sh)."
         )
     print("  OK — all outputs C-contiguous")
 

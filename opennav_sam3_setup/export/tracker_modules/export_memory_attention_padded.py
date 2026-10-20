@@ -33,10 +33,11 @@ from export.tracker_modules.export_tracker_modules import MemoryAttentionWrapper
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--checkpoint", type=Path, default=Path("/home/amd/project/sam3/model/sam3"))
+    p.add_argument("--checkpoint", type=Path,
+                   default=Path(os.environ.get("SAM3_MODEL_DIR", ".")) / "sam3")
     p.add_argument("--onnx-dir", type=Path, default=None,
-                   help="Resolution root (e.g. onnx_files_1008). Defaults from --imgsz.")
-    p.add_argument("--imgsz", type=int, default=1008)
+                   help="Resolution root (e.g. onnx_files_504). Defaults from --imgsz.")
+    p.add_argument("--imgsz", type=int, default=504, choices=(504,))
     p.add_argument("--spatial-slots", type=int, default=7,
                    help="Number of spatial memory frames (default 7, matches max_obj_ptrs_in_encoder)")
     p.add_argument("--ptr-tokens", type=int, default=64,

@@ -16,9 +16,9 @@
 """
 Torch GPU tensor bindings for fixed-shape ONNX Runtime sessions.
 
-ONNX Runtime's ROCm/MIGraphX builds expose the HIP device through the
-``"cuda"`` I/O-binding device name. Binding Torch allocations directly avoids
-the otherwise implicit GPU -> NumPy -> ORT -> NumPy -> GPU bridge.
+Torch allocations are bound to the MIGraphX plugin EP as DLPack ``OrtValue``
+objects. This avoids the otherwise implicit GPU -> NumPy -> ORT -> NumPy -> GPU
+bridge.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 import threading
 
-import numpy as np
+import onnxruntime as ort
 import torch
 
 
@@ -65,13 +65,10 @@ def run_float32_gpu(
             f'GPU I/O binding requires CUDA/HIP tensors, got {first.device}'
         )
     device = first.device
-    device_id = (
-        device.index if device.index is not None else torch.cuda.current_device()
-    )
 
     # The exported ONNX boundaries are FP32 even when MIGraphX quantizes the
     # graph internally. Keep these tensors alive until run_with_iobinding
-    # returns because ORT holds only their raw addresses.
+    # returns because ORT holds only their device addresses.
     bound_inputs = {
         name: tensor.detach().to(
             device=device, dtype=torch.float32
@@ -83,23 +80,17 @@ def run_float32_gpu(
     # Binding failures happen before execution is submitted and callers may
     # safely disable GPU I/O and retry through the host path.
     binding = session.io_binding()
+    # Plugin EP memory has the AMD vendor id; bind_input('cuda') is rejected, so
+    # Torch tensors are bound as DLPack OrtValues. Keep them alive until the run
+    # is synchronized.
+    ort_values = []
     for name, tensor in bound_inputs.items():
-        binding.bind_input(
-            name,
-            'cuda',
-            device_id,
-            np.float32,
-            tuple(tensor.shape),
-            tensor.data_ptr(),
-        )
-    binding.bind_output(
-        output_name,
-        'cuda',
-        device_id,
-        np.float32,
-        tuple(output.shape),
-        output.data_ptr(),
-    )
+        value = ort.OrtValue.from_dlpack(tensor)
+        ort_values.append(value)
+        binding.bind_ortvalue_input(name, value)
+    out_value = ort.OrtValue.from_dlpack(output)
+    ort_values.append(out_value)
+    binding.bind_ortvalue_output(output_name, out_value)
     try:
         if getattr(_thread_state, 'fence_inputs', False):
             # The casts above are Torch kernels queued on the branch stream.

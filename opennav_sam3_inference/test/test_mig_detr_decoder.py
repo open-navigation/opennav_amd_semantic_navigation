@@ -133,8 +133,8 @@ def test_fixed_decoder_requires_mig(gpu_runtime):
         )
 
 
-def test_fixed_decoder_requires_504px(gpu_runtime):
-    with pytest.raises(ValueError, match='requires imgsz=504'):
+def test_live_runtime_requires_504px(gpu_runtime):
+    with pytest.raises(ValueError, match='only the validated 504px'):
         gpu_runtime.SAM3Live(
             checkpoint='unused',
             prompts=['obstacle'],

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # setup.sh — One-command setup for SAM3 on AMD ROCm / gfx1151
 #
-# SAM3 inference and model export run in the ROCm 7.14 / MIGraphX 2.17 Docker
-# image defined in docker/. This script builds that image and installs the
+# SAM3 inference and model export run in the ROS 2 Jazzy / ROCm 10.1 /
+# MIGraphX 2.18 Docker image defined in docker/, assembled from official AMD
+# packages. This script builds that image and installs the
 # bundled model configs and the SAM3 weights into SAM3_MODEL_DIR. ROS 2 Jazzy
 # and colcon for the rest of the stack stay on the host (docker/run_node.sh
 # runs the inference node inside the image).
@@ -13,7 +14,7 @@ usage() {
 Usage:
   ./setup.sh [--skip-image] [--skip-weights] [--yes]
 
-Builds the ROCm 7.14 / MIGraphX 2.17 Docker image (docker/build.sh) and
+Builds the ROCm 10.1 / MIGraphX 2.18 Docker image (docker/build.sh) and
 prepares the SAM3 model directory.
 
 Options:
@@ -24,9 +25,7 @@ Options:
 
 Overrides:
   SAM3_MODEL_DIR          Parent directory for weights and generated artifacts.
-  SAM3_BINARY_CACHE       Download cache for the MIGraphX / ORT binaries.
-  MIGRAPHX_ARCHIVE        Local copy of the pinned MIGraphX archive.
-  ORT_WHEEL_PATH          Local copy of the pinned ONNX Runtime wheel.
+  SAM3_BINARY_CACHE       Download cache for the pinned official wheels.
   SAM3_DOCKER_IMAGE       Docker image tag to build (also used by docker/run.sh).
 USAGE
 }
@@ -165,10 +164,10 @@ info "Docker available"
 if command -v rocminfo >/dev/null; then
     GPU="$(rocminfo 2>/dev/null | grep -oE 'gfx[0-9]+' | head -1 || true)"
     [[ "${GPU}" == "gfx1151" ]] || \
-        warn "Detected ${GPU:-unknown}; the published binaries require gfx1151"
+        warn "Detected ${GPU:-unknown}; the SAM3 image and model build require gfx1151"
 fi
 
-step "1. ROCm 7.14 / MIGraphX 2.17 Docker image"
+step "1. ROCm 10.1 / MIGraphX 2.18 Docker image"
 
 if "${SKIP_IMAGE}"; then
     warn "Skipping image build (--skip-image)"
@@ -240,7 +239,8 @@ echo ""
 echo -e "${G}══════════════════════════════════════════════════════${NC}"
 echo -e "${G}  Setup complete.${NC}"
 echo -e "${G}══════════════════════════════════════════════════════${NC}"
-echo "Build model artifacts inside the container from a new empty"
-echo "onnx_files_<resolution> directory; MXR files and ORT caches from other"
-echo "MIGraphX versions are not compatible with this runtime:"
+echo "Build model artifacts inside the container into a new empty"
+echo "onnx_files_504 directory; MXR files and ORT caches from other MIGraphX"
+echo "versions (including the earlier ROCm 7.14 image) are not compatible with"
+echo "this runtime:"
 echo "  ./docker/run.sh python export/build.py --pipeline text --imgsz 504"

@@ -115,18 +115,57 @@ class _FakeTensor:
 
 
 class _FakeBinding:
-    def bind_input(self, *_args):
+    """Plugin-EP binding: only DLPack OrtValues, no bind_input('cuda')."""
+
+    def bind_ortvalue_input(self, *_args):
         pass
 
-    def bind_output(self, *_args):
+    def bind_ortvalue_output(self, *_args):
         pass
 
     def synchronize_outputs(self):
         pass
 
 
+def _fake_dlpack_ort(monkeypatch, ort_gpu_io):
+    converted = []
+
+    def from_dlpack(tensor):
+        converted.append(tensor)
+        return tensor
+
+    monkeypatch.setattr(
+        ort_gpu_io,
+        'ort',
+        SimpleNamespace(OrtValue=SimpleNamespace(from_dlpack=from_dlpack)),
+    )
+    return converted
+
+
+def test_gpu_io_binds_inputs_and_output_through_dlpack(gpu_runtime, monkeypatch):
+    ort_gpu_io = gpu_runtime.ort_gpu_io
+    converted = _fake_dlpack_ort(monkeypatch, ort_gpu_io)
+    fake_torch = SimpleNamespace(
+        float32=object(),
+        empty=lambda *_args, **_kwargs: _FakeTensor(),
+        cuda=SimpleNamespace(synchronize=lambda **_kwargs: None),
+    )
+    monkeypatch.setattr(ort_gpu_io, 'torch', fake_torch)
+    session = SimpleNamespace(
+        io_binding=lambda: _FakeBinding(),
+        run_with_iobinding=lambda _binding: None,
+    )
+
+    ort_gpu_io.run_float32_gpu(
+        session, {'a': _FakeTensor(), 'b': _FakeTensor()}, 'output', (1,)
+    )
+
+    assert len(converted) == 3
+
+
 def test_gpu_io_execution_failure_is_not_safe_fallback(gpu_runtime, monkeypatch):
     ort_gpu_io = gpu_runtime.ort_gpu_io
+    _fake_dlpack_ort(monkeypatch, ort_gpu_io)
     synchronized = []
     fake_torch = SimpleNamespace(
         float32=object(),
@@ -154,6 +193,7 @@ def test_gpu_io_execution_failure_is_not_safe_fallback(gpu_runtime, monkeypatch)
 
 def test_gpu_io_input_fence_is_scoped(gpu_runtime, monkeypatch):
     ort_gpu_io = gpu_runtime.ort_gpu_io
+    _fake_dlpack_ort(monkeypatch, ort_gpu_io)
     synchronized = []
     fake_stream = SimpleNamespace(
         synchronize=lambda: synchronized.append('input')

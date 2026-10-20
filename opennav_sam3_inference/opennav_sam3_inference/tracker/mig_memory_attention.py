@@ -5,14 +5,16 @@ forward through ONNX Runtime's MIGraphX execution provider with a padded
 FIXED-shape ONNX (`memory_attention_fixed_S7_P64.onnx` produced by
 `export/tracker_modules/export_memory_attention_padded.py`):
 
-    spatial slots: 7  → 7 * 5184 = 36288 spatial tokens (steady-state only)
+    spatial slots: 7  → 7 * 1296 = 9072 spatial tokens at 504 px (steady state)
     pointer tokens: 64 (= max_object_pointers_in_encoder * 4, cap)
-    total memory: 36352 tokens
+    total memory: 9136 tokens
 
 Shape-specialization rule:
     The shim loads each available S1..S10 sibling graph and selects the exact
-    spatial-memory shape at runtime. Missing shapes fall back to the original
-    PyTorch forward. Pointer tokens are padded or truncated to the compiled K.
+    spatial-memory shape at runtime. Callers that pass required_spatial_slots
+    and allow_pytorch_fallback=False (the live runtime) get an error instead of
+    a PyTorch forward for missing shapes. Pointer tokens are padded or
+    truncated to the compiled K.
 
 Why fixed-shape pad rather than dynamic shape:
 - Dynamic ONNX through ORT MIG EP recompiles per shape. The build therefore
@@ -22,6 +24,8 @@ Why fixed-shape pad rather than dynamic shape:
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+import logging
 from pathlib import Path
 import re
 import time
@@ -32,17 +36,16 @@ import torch.nn as nn
 import onnxruntime as ort
 
 from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
+from .ort_plugin_ep import create_mig_session
 
 
 # ----- shape constants -----
-# K is the pointer-token cap. Resolution matters because the MIGraphX MLIR
-# attention kernel selection is shape-dependent (measured 2026-05-15):
-#   504px:  K=4..64 all ≈ 20 ms  (no cliff — production K=64, 16 obj cap)
-#   1008px: K=4..48 all ≈ 87 ms  (fast)
-#   1008px: K=56..64 = 768..806 ms  (cliff, ~9× regression — kernel-pick bug)
-# Production K is selected per-imgsz in tools/text_baseline.py and the build scripts
-# (504→64, 1008→48). Runtime adapts to whatever K is baked into the loaded ONNX.
+# K is the pointer-token cap. At 504 px the MIGraphX attention kernels show no
+# latency cliff for K=4..64, so the build uses K=64 (16 objects). The runtime
+# adapts to whatever K is baked into the loaded ONNX.
 DEFAULT_PTR_TOKENS = 64  # only the export-script default; runtime reads from ONNX
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class MIGMemoryAttention(nn.Module):
@@ -55,8 +58,15 @@ class MIGMemoryAttention(nn.Module):
     frames without falling back to PyTorch.
     """
 
-    def __init__(self, onnx_path: Path, original_forward,
-                 ort_cache_dir: Path | None = None):
+    def __init__(
+        self,
+        onnx_path: Path,
+        original_forward,
+        ort_cache_dir: Path | None = None,
+        *,
+        required_spatial_slots: Iterable[int] | None = None,
+        allow_pytorch_fallback: bool = True,
+    ):
         super().__init__()
         # `original_forward` is the BOUND .forward method captured BEFORE we
         # monkey-patch the module's forward. Storing the module + going through
@@ -67,13 +77,7 @@ class MIGMemoryAttention(nn.Module):
             onnx_path.parent / 'ort_cache_mem_attn'
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
-        self._providers = [
-            ("MIGraphXExecutionProvider", {
-                "migraphx_fp16_enable": "1",
-                "migraphx_model_cache_dir": str(cache_dir),
-            }),
-            "CPUExecutionProvider",
-        ]
+        self._cache_dir = cache_dir
         match = re.search(r'_S(\d+)_P(\d+)\.onnx$', onnx_path.name)
         if match is None:
             raise ValueError(
@@ -94,7 +98,35 @@ class MIGMemoryAttention(nn.Module):
 
         if base_slots not in self._sessions:
             raise FileNotFoundError(onnx_path)
+        required_slots = (
+            tuple(sorted({int(slot) for slot in required_spatial_slots}))
+            if required_spatial_slots is not None
+            else None
+        )
+        if required_slots is not None:
+            if not required_slots or required_slots[0] < 1:
+                raise ValueError(
+                    f'invalid required memory-attention slots: {required_slots}'
+                )
+            missing_slots = sorted(set(required_slots) - self._sessions.keys())
+            if missing_slots:
+                raise RuntimeError(
+                    'incomplete MIG memory-attention artifact coverage: '
+                    f'required S={list(required_slots)}, '
+                    f'available S={sorted(self._sessions)}, '
+                    f'missing S={missing_slots}; refusing silent PyTorch fallback'
+                )
+            non_mig_slots = [
+                slot for slot in required_slots if not self._sessions[slot][3]
+            ]
+            if non_mig_slots:
+                raise RuntimeError(
+                    'MIG memory-attention sessions did not select '
+                    f'MIGraphXExecutionProvider for S={non_mig_slots}'
+                )
         self.session = self._sessions[base_slots][0]
+        self.required_spatial_slots = required_slots
+        self.allow_pytorch_fallback = bool(allow_pytorch_fallback)
 
         # Infer HW from the canonical largest-slot session.
         in_shapes = {x.name: x.shape for x in self.session.get_inputs()}
@@ -115,6 +147,7 @@ class MIGMemoryAttention(nn.Module):
         self._mig_calls = 0
         self._pt_fallback_calls = 0
         self._gpu_io_disabled_slots = set()
+        self._warned_fallback_reasons = set()
 
     def _load_session(self, path: Path):
         opts = ort.SessionOptions()
@@ -124,9 +157,7 @@ class MIGMemoryAttention(nn.Module):
             f'loading {path.name} ...'
         )
         t0 = time.perf_counter()
-        session = ort.InferenceSession(
-            str(path), sess_options=opts, providers=self._providers
-        )
+        session = create_mig_session(path, opts, self._cache_dir)
         elapsed = time.perf_counter() - t0
         provider = session.get_providers()[0]
         output = session.get_outputs()[0]
@@ -155,6 +186,37 @@ class MIGMemoryAttention(nn.Module):
 
         if not ok:
             self._pt_fallback_calls += 1
+            reasons = []
+            if remainder != 0:
+                reasons.append(
+                    f'spatial token count {spatial_part} is not divisible by HW={self.HW}'
+                )
+            if session_info is None:
+                reasons.append(
+                    f'missing S{spatial_slots} specialization; '
+                    f'available S={sorted(self._sessions)}'
+                )
+            if num_object_pointer_tokens < 0:
+                reasons.append(
+                    f'negative pointer-token count {num_object_pointer_tokens}'
+                )
+            if current_vision_features.shape[0] != self.HW:
+                reasons.append(
+                    'current vision token count '
+                    f'{current_vision_features.shape[0]} != HW={self.HW}'
+                )
+            detail = '; '.join(reasons) or 'unknown shape-contract mismatch'
+            message = (
+                'MIG memory_attention cannot serve this call: '
+                f'{detail}. PyTorch fallback count={self._pt_fallback_calls}'
+            )
+            if not self.allow_pytorch_fallback:
+                raise RuntimeError(message + '; fallback is disabled')
+            warning_key = (spatial_slots, remainder, num_object_pointer_tokens,
+                           int(current_vision_features.shape[0]))
+            if warning_key not in self._warned_fallback_reasons:
+                _LOGGER.warning(message)
+                self._warned_fallback_reasons.add(warning_key)
             return self._original_forward(
                 current_vision_features=current_vision_features,
                 memory=memory,
@@ -234,7 +296,13 @@ class MIGMemoryAttention(nn.Module):
         return out_4d.to(device=device, dtype=dtype)
 
 
-def patch_sam3_video_model_memory_attention(model, onnx_path: Path) -> None:
+def patch_sam3_video_model_memory_attention(
+    model,
+    onnx_path: Path,
+    *,
+    required_spatial_slots: Iterable[int] | None = None,
+    allow_pytorch_fallback: bool = True,
+) -> None:
     """Hot-patch `model.tracker_model.memory_attention.forward` in place.
 
     We do NOT swap the whole module — that would break parameter ownership
@@ -244,6 +312,11 @@ def patch_sam3_video_model_memory_attention(model, onnx_path: Path) -> None:
     """
     trk = model.tracker_model
     original_forward = trk.memory_attention.forward  # captured BEFORE monkey-patch
-    shim = MIGMemoryAttention(Path(onnx_path), original_forward)
+    shim = MIGMemoryAttention(
+        Path(onnx_path),
+        original_forward,
+        required_spatial_slots=required_spatial_slots,
+        allow_pytorch_fallback=allow_pytorch_fallback,
+    )
     trk.memory_attention.forward = shim.forward
     trk.memory_attention._mig_shim = shim  # keep ref alive

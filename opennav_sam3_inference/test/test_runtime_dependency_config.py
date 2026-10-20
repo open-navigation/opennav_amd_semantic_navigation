@@ -15,6 +15,7 @@
 
 """CPU-only checks for the pinned Docker SAM3 runtime configuration."""
 
+import ast
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -38,19 +39,64 @@ def _shell_function(name: str) -> str:
     return source[start:end]
 
 
+OFFICIAL_WHEELS = {
+    'torch-2.14.0+rocm10.1.0-cp312-cp312-linux_x86_64.whl':
+        '3182f6f166f42d6f186fd8c4a4ea65e1ed02fba8a98c48f977b68f15cca82636',
+    'amd_torch_device_gfx1151-2.14.0+rocm10.1.0-cp312-cp312-linux_x86_64.whl':
+        '2e340119752d93d639d3baf63b33f92190260738dff3476de374adaf92fb30ef',
+    'amd_torch_device_gfx115x-2.14.0+rocm10.1.0-cp312-cp312-linux_x86_64.whl':
+        '73daa37345172b0556f8a20687197022b8f4c48dd74db5707b03780cc5e71a4d',
+    'torchvision-0.29.0a0+rocm10.1.0-cp312-cp312-linux_x86_64.whl':
+        'f0eed016b74d09192969a7db2f4018941f662c413d55b0eeb157b99941e96e5c',
+    'amd_torchvision_device_gfx1151-0.29.0a0+rocm10.1.0-cp312-cp312-linux_x86_64.whl':
+        '99650eae5ecc34cff9b8d57afd035f174ce7a14a4d66bb2a4bea4e4fc2f86d0d',
+    'triton-3.8.0+git669b31ac.rocm10.1.0-cp312-cp312-linux_x86_64.whl':
+        '2f745c62aebb33167bfb6d586f569fbea67f8fc5181b03798b91a6b9187a625e',
+    'migraphx-2.18.0+rocm10.1.0-cp312-none-manylinux_2_28_x86_64.whl':
+        '6a22d67926759f3ed02ba8d38e31b02e0f69579c5c2893a30745aa0708358c25',
+    'migraphx_libs-2.18.0+rocm10.1.0-py3-none-manylinux_2_28_x86_64.whl':
+        '0a625d0fc835db4727af8b6199a0a85bcaa0578cc2a873f6fbbe36b70d84713b',
+    'onnxruntime_ep_migraphx-1.0.0+rocm10.1.0-cp312-cp312-manylinux_2_28_x86_64.whl':
+        'f43aafe7581fc7f82f94518424c86418371cdcc31c2cb399cec14e7d5c8cd19c',
+    'onnxruntime-1.29.0-cp312-cp312-manylinux_2_28_x86_64.whl':
+        '2b80d8c7ec2cc7438e4da3760b88c24568cba72c9ace96d668800a6c79419acb',
+}
+
+
+def _supported_stack():
+    """Read SUPPORTED_STACK without importing ONNX Runtime."""
+    path = ROOT / 'opennav_sam3_inference/opennav_sam3_inference/tracker/ort_plugin_ep.py'
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == 'SUPPORTED_STACK'
+            for target in node.targets
+        ):
+            return ast.literal_eval(node.value)
+    raise AssertionError('SUPPORTED_STACK not found')
+
+
 def test_published_runtime_pins_are_exact():
-    """Keep the release URLs and hashes tied to the validated rc4 binaries."""
+    """Keep the image tied to the official ROCm 10.1 wheels and nothing else."""
     build = BUILD.read_text()
-    assert 'v2.17.0%2Bsam3-fc1sink.20260908.1' in build
-    assert (
-        'ed1458c632eb2f0e2cab3c457aee93e39196cbb77d2180e47525e0009563dac1'
-        in build
-    )
-    assert 'sam3-tracker-rocm/releases/download/v0.2.0-rc4' in build
-    assert (
-        'ef10e3e808e8805c26cc27f47572a53e385463f29d578e1ea2fe13d00e6f5ee0'
-        in build
-    )
+    rows = {}
+    for line in build.splitlines():
+        if line.startswith('"') and line.endswith('.whl"'):
+            expected, url, name = line.strip('"').split()
+            rows[name] = (expected, url)
+    assert {name: row[0] for name, row in rows.items()} == OFFICIAL_WHEELS
+    bases = ('${TORCH_BASE}/', '${MGX_BASE}/', '${EP_BASE}/', '${PYPI_BASE}/')
+    for _expected, url in rows.values():
+        assert url.startswith(bases), url
+    assert 'TORCH_BASE="https://stable.repo.amd.com/rocm/pytorch/whl-next"' in build
+    assert 'MGX_BASE="https://stable.repo.amd.com/rocm/migraphx/whl-next"' in build
+    assert 'EP_BASE="https://stable.repo.amd.com/rocm/onnxruntime/whl-next"' in build
+    assert 'PYPI_BASE="https://files.pythonhosted.org/packages/' in build
+    for removed in ('github.com', 'fc1sink', 'MIGRAPHX_ARCHIVE', 'ORT_WHEEL_PATH'):
+        assert removed not in build
+    stack = _supported_stack()
+    assert stack['migraphx'] in build.replace('%2B', '+')
+    assert stack['ep_package'] in build.replace('%2B', '+')
+    assert f"onnxruntime-{stack['onnxruntime_prefix']}" in build
     source = SCRIPT.read_text()
     assert 'OFFICIAL_MODEL_REPO="facebook/sam3"' in source
     assert (
@@ -69,14 +115,21 @@ def test_published_runtime_pins_are_exact():
     assert 'MIRROR_MODEL_NAME="sam3.safetensors"' in source
     assert 'ea8e153c669a0284a496c0ec65a53b8e4f5ca7e7' not in source
     dockerfile = DOCKERFILE.read_text()
+    from_lines = [line for line in dockerfile.splitlines() if line.startswith('FROM ')]
+    assert from_lines == [
+        'FROM ros:jazzy-ros-base@sha256:'
+        '103b6c417973394659af6804d4917cd489b91e5ed22eb7bef263025a3bed2410'
+    ]
     for value in (
-        'ROCM_PACKAGE_VERSION=7.14.1-0',
-        'TORCH_VERSION=2.11.0+rocm7.13.0',
-        'TORCHVISION_VERSION=0.26.0+rocm7.13.0',
-        'TRITON_VERSION=3.6.0+rocm7.13.0',
-        'onnxruntime_migraphx-1.24.2-cp312',
+        'ROCM_VERSION=10.1',
+        'ROCM_PACKAGE_VERSION=10.1.0-3',
+        'https://stable.repo.amd.com/rocm/core/packages/ubuntu2404',
+        'COPY --from=wheels / /tmp/wheels/',
+        '--no-deps /tmp/wheels/*.whl',
     ):
         assert value in dockerfile
+    for removed in ('ubuntu:24.04', 'migraphx-develop', 'packages.ros.org', 'ros-dev-tools'):
+        assert removed not in dockerfile
     for package in (
         'amdrocm-runtime-dev',
         'amdrocm-blas-dev',
@@ -92,6 +145,10 @@ def test_published_runtime_pins_are_exact():
         'amdrocm-rand${ROCM_VERSION}-gfx1151',
         'amdrocm-rccl-host',
         'amdrocm-rccl${ROCM_VERSION}-gfx1151',
+        'amdrocm-hipfile${ROCM_VERSION}',
+        'amdrocm-hipfile-dev${ROCM_VERSION}',
+        'ros-${ROS_DISTRO}-rmw-cyclonedds-cpp',
+        'ros-${ROS_DISTRO}-cv-bridge',
     ):
         assert package in dockerfile
     requirements = (SETUP / 'requirements.txt').read_text()
@@ -101,8 +158,10 @@ def test_published_runtime_pins_are_exact():
     assert 'onnxsim>=0.7.3' in requirements
     assert 'onnx-simplifier' not in requirements
     assert 'onnx-simplifier' not in constraints
-    assert 'setuptools==79.0.1' in constraints
-    assert 'wheel==0.42.0' in constraints
+    assert 'numpy==1.26.4' in constraints
+    assert 'onnxruntime==1.29.0' in constraints
+    for removed in ('setuptools==', 'colcon-core==', 'pytest=='):
+        assert removed not in constraints
 
 
 def test_shell_entrypoints_and_help_are_side_effect_free():
@@ -119,7 +178,7 @@ def test_shell_entrypoints_and_help_are_side_effect_free():
     assert result.returncode == 0
     assert '--skip-image' in result.stdout
     assert '--skip-weights' in result.stdout
-    assert 'ROCm 7.14' in result.stdout
+    assert 'ROCm 10.1' in result.stdout
     source = SCRIPT.read_text()
     assert 'if ((EUID == 0))' in source
     assert 'Do not run setup.sh as root' in source
@@ -230,5 +289,5 @@ def test_system_rocm_shim_uses_configured_root(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location('rocm_sdk_system', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.__version__ == '7.14.0'
+    assert module.__version__ == '10.1.0'
     assert module.find_libraries('amdhip64') == [library]

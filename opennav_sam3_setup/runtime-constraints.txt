@@ -1,9 +1,13 @@
-# Pure-Python and numerical dependencies validated with the SAM3 rc4 runtime.
-# Torch, torchvision, Triton and ORT are installed separately from pinned
-# gfx1151 wheels; do not add them here.
+# Pure-Python and numerical dependencies for the ROCm 10.1 runtime.
+# Torch/torchvision/Triton, MIGraphX and ORT come from their separately pinned
+# wheels (docker/build.sh); do not let pip substitute PyPI Torch or
+# Python-packaged ROCm libraries. colcon, pytest and setuptools come from the
+# ROS 2 Jazzy base image.
 transformers==5.8.1
 safetensors==0.7.0
 opencv-python==4.11.0.86
+# NumPy must stay ABI-compatible with the ROS Python extensions (rclpy,
+# cv_bridge), which are built against the system NumPy 1.26.
 numpy==1.26.4
 scipy==1.17.1
 onnx==1.17.0
@@ -15,8 +19,6 @@ huggingface-hub==1.30.0
 flatbuffers==25.12.19
 protobuf==6.33.5
 packaging==23.0
-setuptools==79.0.1
-wheel==0.42.0
 pyyaml==6.0.1
 markupsafe==3.0.3
 click==8.4.2
@@ -43,9 +45,4 @@ markdown-it-py==4.2.0
 mdurl==0.1.2
 shellingham==1.5.4
 annotated-doc==0.0.5
-
-# Keep the Conda-side colcon runner compatible with ROS 2 Jazzy's pytest
-# plugins. pytest 9 removed the legacy ``path`` hook argument still used by
-# Jazzy's launch_testing package.
-colcon-core==0.20.1
-pytest==8.3.5
+onnxruntime==1.29.0

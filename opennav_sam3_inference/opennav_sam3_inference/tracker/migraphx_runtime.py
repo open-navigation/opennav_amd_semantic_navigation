@@ -29,11 +29,10 @@ from .rocm_env import apply as _apply_rocm_env
 
 
 _apply_rocm_env()
-os.environ.setdefault('MIGRAPHX_SKIP_BENCHMARKING', '1')
 
 
 def _load_migraphx_module():
-    """Import MIGraphX from the explicitly configured binary prefix."""
+    """Import the MIGraphX Python module (the official MIGraphX wheel)."""
     import migraphx
 
     return migraphx

@@ -23,6 +23,7 @@ import onnxruntime as ort
 from transformers.models.sam3.modeling_sam3 import Sam3DETREncoderOutput
 
 from .ort_gpu_io import GpuIoExecutionError, run_float32_gpu
+from .ort_plugin_ep import create_mig_session
 
 
 def precompute_cross_attn_mask(text_mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
@@ -53,17 +54,10 @@ class MIGDetrEncoder(nn.Module):
             Path(onnx_path).parent / "ort_cache"
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
-        providers = [
-            ("MIGraphXExecutionProvider", {
-                "migraphx_fp16_enable": "1",
-                "migraphx_model_cache_dir": str(cache_dir),
-            }),
-            "CPUExecutionProvider",
-        ]
-        print(f"  detr_encoder (ORT MIG EP, fp16): compiling from {Path(onnx_path).name} ...")
+        print(f"  detr_encoder (ORT MIG EP, fp16): opening {Path(onnx_path).name} ...")
         import time
         t0 = time.perf_counter()
-        self.session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=providers)
+        self.session = create_mig_session(onnx_path, opts, cache_dir)
         elapsed = time.perf_counter() - t0
         prov = self.session.get_providers()[0]
         output = self.session.get_outputs()[0]
@@ -204,8 +198,9 @@ def patch_sam3_video_model_detr_encoder(model, onnx_path: Path) -> None:
     """In-place replace `model.detector_model.detr_encoder` with the ORT MIG EP shim.
 
     `onnx_path` should be the simplified .onnx (e.g.
-    `onnx_files_1008/detector_modules/detr_encoder_simplified.onnx`); the ORT
-    MIG EP compiles it on first use and caches the resulting .mxr next door.
+    `onnx_files_504/detector_modules/detr_encoder_simplified.onnx`); the build's
+    prewarm step compiles its MIGraphX cache next door, and the ORT MIG EP
+    loads that cache instead of compiling at startup.
 
     Call after `patch_sam3_video_model_with_mig` (or before — independent).
     """

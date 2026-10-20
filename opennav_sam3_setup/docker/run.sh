@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run a command inside the OpenNav SAM3 ROCm 7.14 container.
+# Run a command inside the OpenNav SAM3 ROCm 10.1 container.
 #
 #   SAM3_MODEL_DIR   host weights + onnx_files_* directory (mounted at /models;
 #                    default: opennav_sam3_setup, as in setup.sh)
@@ -14,7 +14,7 @@ set -euo pipefail
 
 SETUP_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="$(cd -- "${SETUP_DIR}/.." && pwd)"
-IMAGE="${SAM3_DOCKER_IMAGE:-opennav-sam3-gpu714-ort1242-mgx217-gfx1151:0.2.0-rc4}"
+IMAGE="${SAM3_DOCKER_IMAGE:-opennav-sam3-gpu101-ort129-mgx218-gfx1151:0.4.0-rc1}"
 MODEL_DIR="${SAM3_MODEL_DIR:-${SETUP_DIR}}"
 
 if [[ ! -e /dev/kfd || ! -d /dev/dri ]]; then
@@ -107,6 +107,7 @@ if [[ $# -eq 0 ]]; then
 fi
 
 CONTAINER_USER="$(id -un 2>/dev/null || printf 'opennav')"
+IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${IMAGE}" 2>/dev/null || true)"
 exec docker run --pull=never --rm "${tty_args[@]}" \
     --network host --ipc=host \
     "${gpu_args[@]}" \
@@ -116,7 +117,8 @@ exec docker run --pull=never --rm "${tty_args[@]}" \
     -e LOGNAME="${CONTAINER_USER}" \
     -e HF_HUB_OFFLINE=1 \
     -e SAM3_MODEL_DIR=/models \
-    -e PYTHONPATH=/workspace/opennav_sam3_inference:/opt/migraphx-develop/lib \
+    -e SAM3_DOCKER_IMAGE_ID="${IMAGE_ID}" \
+    -e PYTHONPATH=/workspace/opennav_sam3_inference \
     "${ros_env_args[@]}" \
     "${mount_args[@]}" \
     -w /workspace/opennav_sam3_setup \

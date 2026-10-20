@@ -19,11 +19,21 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 from pathlib import Path
 import shutil
 
+# Provider build policy must be fixed before ONNX Runtime loads MIGraphX.
+os.environ.pop("MIGRAPHX_SKIP_BENCHMARKING", None)
+os.environ.pop("MIGRAPHX_MLIR_USE_SPECIFIC_OPS", None)
+
+import sys
+
 import numpy as np
 import onnxruntime as ort
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "opennav_sam3_inference"))
+from opennav_sam3_inference.tracker.ort_plugin_ep import create_mig_session  # noqa: E402
 
 
 def sha256(path: Path) -> str:
@@ -52,16 +62,8 @@ def main() -> int:
 
     options = ort.SessionOptions()
     options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    session = ort.InferenceSession(
-        str(args.onnx),
-        sess_options=options,
-        providers=[(
-            "MIGraphXExecutionProvider",
-            {"migraphx_fp16_enable": "1", "migraphx_model_cache_dir": str(cache)},
-        )],
-    )
-    if session.get_providers()[0] != "MIGraphXExecutionProvider":
-        raise RuntimeError(f"MIGraphX is not primary: {session.get_providers()}")
+    # Raises if any node is not assigned to the MIGraphX EP.
+    session = create_mig_session(args.onnx, options, cache)
 
     generator = np.random.default_rng(20260831)
     feed = {}
