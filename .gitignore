@@ -1,0 +1,15 @@
+# Byte-compiled / optimized Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# colcon / ament build artifacts
+build/
+install/
+log/
+
+# Editor / OS cruft
+.vscode/
+*.swp
+.DS_Store
