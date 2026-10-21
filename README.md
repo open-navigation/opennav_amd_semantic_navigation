@@ -26,11 +26,11 @@ This demonstrates state-of-the-art foundation model workflows using AMD's Strix 
 
 SAM3 is a state-of-the-art _text-promptable_ foundation model. It accepts text prompts regarding what to segment from the image ("person", "pallet", "wet floor sign", "curb", "mud", "ceiling", ...) and it returns masks for each class and ID of each object within a class. Gone are the days of fixed detectors or segmentation algorithm classes: the same model can be used at run-time to find various environments, objects, surfaces, and more without retraining (and may be dynamically changed at run-time too!). Combining this with Nav2's costmap, behavior tree, and/or algorithm plugins, SAM3 is extremely powerful and empowers intelligent applications to be developed understanding the world more fully. This enables the robot to make decisions about navigation or behaviors driven not by obstacles but by rich semantic context.
 
-| Prompts | New detect every frame (ms) | New Detect every 1s, track between |
-| ------- | ------------------ | --------------------- |
-| 1       |  154.6 (6.46 Hz)   |  103.8 (9.63 Hz)      |
-| 2       |  183.3 (5.45 Hz)   |  136.0 (7.35 Hz)      |
-| 4       |  305.6 (3.27 Hz)   |  211.3 (4.73 Hz)      |
+| Prompts | Tracked objects | New detect every frame (ms) | New Detect every 1s, track between |
+| ------- | --------------- | ------------------ | --------------------- |
+| 1       | 2               |  100.7 (9.93 Hz)   |  97.9 (10.21 Hz)      |
+| 2       | 3               |  119.8 (8.35 Hz)   |  112.3 (8.91 Hz)      |
+| 4       | 6               |  167.1 (5.98 Hz)   |  146.2 (6.84 Hz)      |
 
 The choice of redetecting each frame or not can depend on the FOV of the sensor and how dynamic your environment is. **5-10 Hz for a server class semantic segmentation algorithm is very impressive on the Strix Halo!** 
 
